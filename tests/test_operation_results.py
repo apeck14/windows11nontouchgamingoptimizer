@@ -734,6 +734,7 @@ if(-not $script:inventoryShown){throw 'App inventory was not shown'}
     def test_automatic_downloads_require_both_dates_and_skip_nested_files_and_active_apps(self):
         self.run_case(r'''
 . (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$env:ProgramData=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'programdata'
 $env:APPDATA=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'roaming'
 $env:LOCALAPPDATA=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'local'
 $root=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'downloads'
@@ -759,6 +760,7 @@ if(@(Get-AutomaticCleanupFiles).Count){throw 'Active browser files selected'}
     def test_automatic_crash_reports_use_known_paths_and_preserve_recent_reports(self):
         self.run_case(r'''
 . (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$env:ProgramData=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'programdata'
 $env:APPDATA=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'roaming'
 $env:LOCALAPPDATA=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'local'
 function Get-DownloadsFolder {''}
@@ -777,6 +779,82 @@ $files=@(Get-AutomaticCleanupFiles)
 if($files.Count -ne 1 -or $files[0].Path -ne (Join-Path $report 'old.dmp')){throw 'Crash report boundary failed'}
 function Get-Process {[pscustomobject]@{ProcessName='Discord';Path=''}}
 if(@(Get-AutomaticCleanupFiles).Count){throw 'Active Discord selected'}
+''')
+
+    def test_automatic_web_cache_and_logs_preserve_user_data_and_skip_running_apps(self):
+        self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$base=Split-Path $env:OPTIMIZER_RESULTS
+$env:ProgramData=Join-Path $base 'programdata'
+$env:APPDATA=Join-Path $base 'roaming'
+$env:LOCALAPPDATA=Join-Path $base 'local'
+function Get-DownloadsFolder {''}
+function Get-Process {}
+function Get-OldDriverExtractionFiles {}
+$eligible=@(
+    (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Default\Cache\Cache_Data\entry'),
+    (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data\Profile 2\Cache\Cache_Data\entry'),
+    (Join-Path $env:LOCALAPPDATA 'Mozilla\Firefox\Profiles\example.default\cache2\entries\entry'),
+    (Join-Path $env:APPDATA 'Code\logs\session\main.log'),
+    (Join-Path $env:APPDATA 'Slack\logs\app.log'),
+    (Join-Path $env:LOCALAPPDATA 'EpicGamesLauncher\Saved\Logs\launcher.log'))
+$protected=@(
+    (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Default\Cookies'),
+    (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Default\Sessions\tabs'),
+    (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Default\GPUCache\entry'),
+    (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Custom\Cache\Cache_Data\entry'),
+    (Join-Path $env:LOCALAPPDATA 'Mozilla\Firefox\Profiles\example.default\OfflineCache\entry'),
+    (Join-Path $env:APPDATA 'Code\User\History\backup.log'),
+    (Join-Path $env:APPDATA 'Code\logs\settings.json'),
+    (Join-Path $env:APPDATA 'Slack\Local Storage\data'),
+    (Join-Path $env:LOCALAPPDATA 'EpicGamesLauncher\Saved\Config\settings.ini'))
+foreach($p in @($eligible)+@($protected)) {
+    $null=New-Item -ItemType Directory (Split-Path $p) -Force
+    [IO.File]::WriteAllText($p,'fixture')
+    (Get-Item $p).CreationTime=(Get-Date).AddDays(-40)
+    (Get-Item $p).LastWriteTime=(Get-Date).AddDays(-40)
+}
+$files=@(Get-AutomaticCleanupFiles)
+if($files.Count -ne $eligible.Count -or @($files | Where-Object Path -in $protected).Count){throw 'Cache/log scan included saved data or missed targets'}
+foreach($p in $eligible){if($p -notin $files.Path){throw "Missed $p"}}
+(Get-Item $eligible[0]).LastWriteTime=Get-Date
+if(@(Get-AutomaticCleanupFiles).Count -ne ($eligible.Count-1)){throw 'Recent cache selected'}
+function Get-Process {
+    foreach($name in @('chrome','msedge','firefox','Code','slack','EpicGamesLauncher')) {
+        [pscustomobject]@{ProcessName=$name;Path=''}
+    }
+}
+if(@(Get-AutomaticCleanupFiles).Count){throw 'Running application files selected'}
+''')
+
+    def test_deep_cleanup_automates_old_temp_and_archived_reports_only(self):
+        self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$base=Split-Path $env:OPTIMIZER_RESULTS
+$env:ProgramData=Join-Path $base 'programdata'
+$env:APPDATA=Join-Path $base 'roaming'
+$env:LOCALAPPDATA=Join-Path $base 'local'
+function Get-DownloadsFolder {''}
+function Get-Process {}
+function Get-OldDriverExtractionFiles {}
+$eligible=@(
+    (Join-Path $env:LOCALAPPDATA 'Temp\old.tmp'),
+    (Join-Path $env:LOCALAPPDATA 'CrashDumps\app.dmp'),
+    (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\WER\ReportArchive\report\Report.wer'),
+    (Join-Path $env:ProgramData 'Microsoft\Windows\WER\ReportArchive\report\Report.wer'))
+$queue=Join-Path $env:ProgramData 'Microsoft\Windows\WER\ReportQueue\pending\Report.wer'
+foreach($p in @($eligible)+@($queue)) {
+    $null=New-Item -ItemType Directory (Split-Path $p) -Force
+    [IO.File]::WriteAllText($p,'fixture')
+    (Get-Item $p).CreationTime=(Get-Date).AddDays(-40)
+    (Get-Item $p).LastWriteTime=(Get-Date).AddDays(-40)
+}
+$files=@(Get-AutomaticCleanupFiles)
+if($files.Count -ne 4 -or $queue -in $files.Path){throw 'Automatic system cleanup boundary failed'}
+if(@(Get-CleanupCandidates Deep).Count){throw 'Automatic files offered twice'}
+if(@(Get-CleanupCandidates Safe).Count -ne 1){throw 'Quick cleanup changed'}
+(Get-Item $eligible[0]).CreationTime=Get-Date
+if(@(Get-AutomaticCleanupFiles).Count -ne 3){throw 'Recently created temp file selected'}
 ''')
 
     def test_driver_extractions_require_signed_layout_keep_newest_and_skip_recent_or_running(self):
@@ -1024,7 +1102,7 @@ $queue=Join-Path $env:ProgramData 'Microsoft\Windows\WER\ReportQueue'
 $null=New-Item -ItemType Directory $archive,$queue -Force
 if(-not (Test-CleanupPath $archive)){throw 'Archive should be eligible'}
 if(Test-CleanupPath $queue){throw 'Pending queue must remain protected'}
-$roots=@(Get-CleanupRoots Deep | Where-Object Category -eq 'Archived crash report - review')
+$roots=@(Get-AutomaticCleanupRoots | Where-Object Category -eq 'Archived crash report')
 if(-not ($roots.Path -contains $archive) -or @($roots | Where-Object Days -ne 30).Count){throw 'Incorrect archive rules'}
 ''')
 

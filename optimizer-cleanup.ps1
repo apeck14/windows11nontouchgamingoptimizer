@@ -126,15 +126,11 @@ function Show-StorageSummary {
 }
 
 function Get-CleanupRoots([string]$Scope) {
-    [pscustomobject]@{Path=(Join-Path $env:LOCALAPPDATA 'Temp'); Category='Old temporary file'; Days=30; Extensions=$null}
+    if ($Scope -eq 'Safe') { [pscustomobject]@{Path=(Join-Path $env:LOCALAPPDATA 'Temp'); Category='Old temporary file'; Days=30; Extensions=$null} }
     if ($Scope -eq 'Deep') {
         $downloads = Get-DownloadsFolder
         if ($downloads) {
             [pscustomobject]@{Path=$downloads; Category='Old download - review'; Days=90; Extensions=@('.exe','.msi','.msix','.msixbundle','.appx','.appxbundle','.cab','.msp','.zip','.7z','.rar','.iso')}
-        }
-        [pscustomobject]@{Path=(Join-Path $env:LOCALAPPDATA 'CrashDumps'); Category='Old crash dump'; Days=30; Extensions=@('.dmp')}
-        foreach ($path in @($env:LOCALAPPDATA,$env:ProgramData)) {
-            [pscustomobject]@{Path=(Join-Path $path 'Microsoft\Windows\WER\ReportArchive'); Category='Archived crash report - review'; Days=30; Extensions=$null}
         }
         $videos = [Environment]::GetFolderPath('MyVideos')
         if ($videos) {
@@ -207,6 +203,11 @@ function Test-CleanupBusy($Processes, [string]$PackageRoot) {
 }
 
 function Get-AutomaticCleanupRoots {
+    [pscustomobject]@{Path=(Join-Path $env:LOCALAPPDATA 'Temp');Category='Old temporary file';Days=30;Automatic=$true}
+    [pscustomobject]@{Path=(Join-Path $env:LOCALAPPDATA 'CrashDumps');Category='Old crash dump';Days=30;Extensions=@('.dmp');Automatic=$true;Processes=@('WerFault','WerFaultSecure','wermgr')}
+    foreach ($path in @($env:LOCALAPPDATA,$env:ProgramData)) {
+        [pscustomobject]@{Path=(Join-Path $path 'Microsoft\Windows\WER\ReportArchive');Category='Archived crash report';Days=30;Automatic=$true;Processes=@('WerFault','WerFaultSecure','wermgr')}
+    }
     $browsers=@('chrome','msedge','brave','firefox','opera','vivaldi')
     $downloads=Get-DownloadsFolder
     if ($downloads) {
@@ -222,6 +223,37 @@ function Get-AutomaticCleanupRoots {
         @($env:APPDATA,'discordptb\Crashpad\reports','DiscordPTB')
     )) {
         [pscustomobject]@{Path=(Join-Path $app[0] $app[1]);Category='Old application crash report';Days=30;Extensions=@('.dmp','.extra','.txt');Automatic=$true;Processes=@($app[2])}
+    }
+    # Exact diagnostic folders only; never match logs or caches across an app's whole profile.
+    foreach ($app in @(
+        @($env:APPDATA,'discord\logs','Discord'),
+        @($env:APPDATA,'discordcanary\logs','DiscordCanary'),
+        @($env:APPDATA,'discordptb\logs','DiscordPTB'),
+        @($env:APPDATA,'Slack\logs','slack'),
+        @($env:APPDATA,'Code\logs','Code'),
+        @($env:APPDATA,'Code - Insiders\logs','Code - Insiders'),
+        @($env:LOCALAPPDATA,'EpicGamesLauncher\Saved\Logs','EpicGamesLauncher'),
+        @($env:LOCALAPPDATA,'CrashReportClient\Saved\Logs','CrashReportClient')
+    )) {
+        [pscustomobject]@{Path=(Join-Path $app[0] $app[1]);Category='Old application log';Days=30;Extensions=@('.log','.old','.gz','.txt');Automatic=$true;Processes=@($app[2])}
+    }
+    [pscustomobject]@{Path=(Join-Path $env:LOCALAPPDATA 'EpicGamesLauncher\Saved\Crashes');Category='Old application crash report';Days=30;Extensions=@('.dmp','.log','.xml');Automatic=$true;Processes=@('EpicGamesLauncher','CrashReportClient')}
+    foreach ($browser in @(
+        @('Google\Chrome\User Data','chrome'),
+        @('Microsoft\Edge\User Data','msedge'),
+        @('BraveSoftware\Brave-Browser\User Data','brave')
+    )) {
+        $base=Join-Path $env:LOCALAPPDATA $browser[0]
+        if (-not (Test-CleanupPath $base)) { continue }
+        foreach ($profile in Get-ChildItem -LiteralPath $base -Directory | Where-Object { $_.Name -eq 'Default' -or $_.Name -match '^Profile \d+$' }) {
+            [pscustomobject]@{Path=(Join-Path $profile.FullName 'Cache\Cache_Data');Category='Old browser web cache';Days=30;Automatic=$true;Processes=@($browser[1])}
+        }
+    }
+    $cacheProfiles=Join-Path $env:LOCALAPPDATA 'Mozilla\Firefox\Profiles'
+    if (Test-CleanupPath $cacheProfiles) {
+        foreach ($profile in Get-ChildItem -LiteralPath $cacheProfiles -Directory) {
+            [pscustomobject]@{Path=(Join-Path $profile.FullName 'cache2\entries');Category='Old browser web cache';Days=30;Automatic=$true;Processes=@('firefox')}
+        }
     }
     $profiles=Join-Path $env:APPDATA 'Mozilla\Firefox\Profiles'
     if (Test-CleanupPath $profiles) {
@@ -356,7 +388,7 @@ function Invoke-RecycleCleanup([string]$Scope) {
         Show-AppInventory
         Write-Host 'Automatically recycling identical loose installer/archive downloads; the oldest-created copy is kept.'
         $success = Invoke-RecycleFiles @(Get-DuplicateDownloads)
-        Write-Host 'Automatically recycling old crash reports, abandoned downloads and older verified driver extractions; the newest driver package is kept.'
+        Write-Host 'Automatically recycling old temp files, logs, web caches, crash reports, abandoned downloads and verified driver extractions; the newest driver package is kept.'
         if (-not (Invoke-RecycleFiles @(Get-AutomaticCleanupFiles))) { $success=$false }
     }
     $files = @(Get-CleanupCandidates $Scope | Sort-Object Path -Unique)
