@@ -852,9 +852,39 @@ foreach($p in @($eligible)+@($queue)) {
 $files=@(Get-AutomaticCleanupFiles)
 if($files.Count -ne 4 -or $queue -in $files.Path){throw 'Automatic system cleanup boundary failed'}
 if(@(Get-CleanupCandidates Deep).Count){throw 'Automatic files offered twice'}
-if(@(Get-CleanupCandidates Safe).Count -ne 1){throw 'Quick cleanup changed'}
+if(@(Get-CleanupCandidates Safe).Count -ne 4){throw 'Quick cleanup missed shared temp/crash targets'}
 (Get-Item $eligible[0]).CreationTime=Get-Date
 if(@(Get-AutomaticCleanupFiles).Count -ne 3){throw 'Recently created temp file selected'}
+''')
+
+    def test_deep_includes_every_quick_rule_once_and_keeps_expensive_scans_separate(self):
+        self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$base=Split-Path $env:OPTIMIZER_RESULTS
+$env:ProgramData=Join-Path $base 'programdata'
+$env:APPDATA=Join-Path $base 'roaming'
+$env:LOCALAPPDATA=Join-Path $base 'local'
+function Get-DownloadsFolder {throw 'Quick must not inspect Downloads'}
+$quickRoots=@(Get-CleanupRoots Safe)
+if(-not @($quickRoots | Where-Object Category -eq 'Old application log').Count){throw 'Quick missed app logs'}
+if(-not @($quickRoots | Where-Object Category -eq 'Old application crash report').Count){throw 'Quick missed app crashes'}
+function Get-DownloadsFolder {Join-Path $base 'downloads'}
+$deepRoots=@(Get-AutomaticCleanupRoots)
+foreach($root in $quickRoots) {
+    $matches=@($deepRoots | Where-Object Path -eq $root.Path)
+    if($matches.Count -ne 1 -or $matches[0].Days -ne $root.Days -or $matches[0].Automatic -ne $root.Automatic){throw 'Deep differs from Quick or duplicates a shared rule'}
+}
+$log=Join-Path $env:APPDATA 'Code\logs\old.log'
+$null=New-Item -ItemType Directory (Split-Path $log) -Force
+[IO.File]::WriteAllText($log,'fixture')
+(Get-Item $log).LastWriteTime=(Get-Date).AddDays(-40)
+if(@(Get-CleanupCandidates Safe).Count){throw 'Quick accepted recently created old-dated file'}
+(Get-Item $log).CreationTime=(Get-Date).AddDays(-40)
+function Get-Process {}
+function Get-OldDriverExtractionFiles {}
+$quick=@(Get-CleanupCandidates Safe)
+$deep=@(Get-AutomaticCleanupFiles)
+if($quick.Count -ne 1 -or $deep.Count -ne 1 -or $quick[0].Path -ne $deep[0].Path){throw 'Deep did not include Quick candidate exactly once'}
 ''')
 
     def test_driver_extractions_require_signed_layout_keep_newest_and_skip_recent_or_running(self):

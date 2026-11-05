@@ -126,7 +126,7 @@ function Show-StorageSummary {
 }
 
 function Get-CleanupRoots([string]$Scope) {
-    if ($Scope -eq 'Safe') { [pscustomobject]@{Path=(Join-Path $env:LOCALAPPDATA 'Temp'); Category='Old temporary file'; Days=30; Extensions=$null} }
+    if ($Scope -eq 'Safe') { Get-AutomaticCleanupRoots 'Safe' }
     if ($Scope -eq 'Deep') {
         $downloads = Get-DownloadsFolder
         if ($downloads) {
@@ -202,16 +202,11 @@ function Test-CleanupBusy($Processes, [string]$PackageRoot) {
     return $false
 }
 
-function Get-AutomaticCleanupRoots {
+function Get-AutomaticCleanupRoots([string]$Scope = 'Deep') {
     [pscustomobject]@{Path=(Join-Path $env:LOCALAPPDATA 'Temp');Category='Old temporary file';Days=30;Automatic=$true}
     [pscustomobject]@{Path=(Join-Path $env:LOCALAPPDATA 'CrashDumps');Category='Old crash dump';Days=30;Extensions=@('.dmp');Automatic=$true;Processes=@('WerFault','WerFaultSecure','wermgr')}
     foreach ($path in @($env:LOCALAPPDATA,$env:ProgramData)) {
         [pscustomobject]@{Path=(Join-Path $path 'Microsoft\Windows\WER\ReportArchive');Category='Archived crash report';Days=30;Automatic=$true;Processes=@('WerFault','WerFaultSecure','wermgr')}
-    }
-    $browsers=@('chrome','msedge','brave','firefox','opera','vivaldi')
-    $downloads=Get-DownloadsFolder
-    if ($downloads) {
-        [pscustomobject]@{Path=$downloads;Category='Abandoned download';Days=30;Extensions=@('.crdownload','.part');LooseOnly=$true;Automatic=$true;Processes=$browsers}
     }
     foreach ($app in @(
         @($env:LOCALAPPDATA,'Google\Chrome\User Data\Crashpad\reports','chrome'),
@@ -238,6 +233,18 @@ function Get-AutomaticCleanupRoots {
         [pscustomobject]@{Path=(Join-Path $app[0] $app[1]);Category='Old application log';Days=30;Extensions=@('.log','.old','.gz','.txt');Automatic=$true;Processes=@($app[2])}
     }
     [pscustomobject]@{Path=(Join-Path $env:LOCALAPPDATA 'EpicGamesLauncher\Saved\Crashes');Category='Old application crash report';Days=30;Extensions=@('.dmp','.log','.xml');Automatic=$true;Processes=@('EpicGamesLauncher','CrashReportClient')}
+    $profiles=Join-Path $env:APPDATA 'Mozilla\Firefox\Profiles'
+    if (Test-CleanupPath $profiles) {
+        foreach ($profile in Get-ChildItem -LiteralPath $profiles -Directory) {
+            [pscustomobject]@{Path=(Join-Path $profile.FullName 'minidumps');Category='Old application crash report';Days=30;Extensions=@('.dmp','.extra');Automatic=$true;Processes=@('firefox')}
+        }
+    }
+    if ($Scope -eq 'Safe') { return }
+    $browsers=@('chrome','msedge','brave','firefox','opera','vivaldi')
+    $downloads=Get-DownloadsFolder
+    if ($downloads) {
+        [pscustomobject]@{Path=$downloads;Category='Abandoned download';Days=30;Extensions=@('.crdownload','.part');LooseOnly=$true;Automatic=$true;Processes=$browsers}
+    }
     foreach ($browser in @(
         @('Google\Chrome\User Data','chrome'),
         @('Microsoft\Edge\User Data','msedge'),
@@ -255,12 +262,7 @@ function Get-AutomaticCleanupRoots {
             [pscustomobject]@{Path=(Join-Path $profile.FullName 'cache2\entries');Category='Old browser web cache';Days=30;Automatic=$true;Processes=@('firefox')}
         }
     }
-    $profiles=Join-Path $env:APPDATA 'Mozilla\Firefox\Profiles'
-    if (Test-CleanupPath $profiles) {
-        foreach ($profile in Get-ChildItem -LiteralPath $profiles -Directory) {
-            [pscustomobject]@{Path=(Join-Path $profile.FullName 'minidumps');Category='Old application crash report';Days=30;Extensions=@('.dmp','.extra');Automatic=$true;Processes=@('firefox')}
-        }
-    }
+
 }
 
 function Get-DriverExtractionRoots {
@@ -388,7 +390,7 @@ function Invoke-RecycleCleanup([string]$Scope) {
         Show-AppInventory
         Write-Host 'Automatically recycling identical loose installer/archive downloads; the oldest-created copy is kept.'
         $success = Invoke-RecycleFiles @(Get-DuplicateDownloads)
-        Write-Host 'Automatically recycling old temp files, logs, web caches, crash reports, abandoned downloads and verified driver extractions; the newest driver package is kept.'
+        Write-Host 'Running quick cleanup plus old web caches, abandoned downloads and verified driver extractions; the newest driver package is kept.'
         if (-not (Invoke-RecycleFiles @(Get-AutomaticCleanupFiles))) { $success=$false }
     }
     $files = @(Get-CleanupCandidates $Scope | Sort-Object Path -Unique)
