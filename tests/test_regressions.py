@@ -1,8 +1,4 @@
-"""Non-admin regression tests. Never execute the optimizer's startup or real tweaks.
-
-Extracted control-flow routines use explicit stubs. Cleanup runs real file
-operations only in a disposable directory; all service operations are mocked.
-"""
+"""Batch control-flow tests with stubbed operations; no real optimizations."""
 import json
 import os
 from pathlib import Path

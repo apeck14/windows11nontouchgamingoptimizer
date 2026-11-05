@@ -1,45 +1,35 @@
-# Windows 11 Non-Touch Gaming Optimizer
+# Windows 11 Gaming Optimizer
 
-Debloating and Windows configuration utility. Originally by [Matt Hurley](https://github.com/theantipopau/windows11nontouchgamingoptimizer); maintained in [this fork](https://github.com/apeck14/windows11nontouchgamingoptimizer). Settings are not guaranteed FPS or latency improvements.
+Windows configuration and recycle-only cleanup. Originally by [Matt Hurley](https://github.com/theantipopau/windows11nontouchgamingoptimizer); maintained in [this fork](https://github.com/apeck14/windows11nontouchgamingoptimizer). [MIT license](LICENSE).
 
 ## Run
 
-Extract the repository ZIP, keeping all three `.bat`/`.ps1` files together. Run the batch file as administrator. The menu lists individual actions.
+Extract all three `.bat`/`.ps1` files together and run `win11_nontouch_gaming_optimiser.bat` as administrator. The menu describes individual actions.
 
-- **1/F Full:** all routines, including aggressive networking and advanced GPU/storage settings; recycles old user temp files.
-- **2 Recommended:** app inventory, gaming settings, services, safe networking, visuals and core parking.
-- **4:** installed-app inventory; no uninstall. **B:** recycle user temp files older than 30 days.
-- **J:** storage/category and largest-app-folder estimates in GB. Automatically recycles SHA-256-identical loose installer/archive downloads with matching extensions and alternate-stream contents, keeping the oldest-created copy. Other old downloads, crash dumps, archived error reports (30+ days) and recordings require selection; nothing is preselected. Changed or unavailable retained copies prevent automatic recycling. Pending error reports are excluded; skipped locations are marked partial.
-- **3:** set up System Protection and create a restore point. **R:** open System Restore.
-- **G:** display refresh/GPU checks. **M:** memory integrity on/off.
-- **P:** session operation results. **V:** limited live configuration checks.
+- Full/Recommended default to **memory integrity (HVCI) off**, reducing security and potentially affecting anti-cheat compatibility. **M** re-enables it. Game DVR recording defaults off; answer No to preserve capture settings. Installed apps remain installed. Performance gains are not guaranteed.
+- Both presets attempt to enable System Protection and verify a new restore point. Failure defaults to cancelling. **3** creates a checkpoint; **R** opens System Restore. Individual tweaks do not create checkpoints automatically. Restore points can expire; **Undo** is partial, not a substitute for a backup.
+- **B** recycles user temp files older than 30 days. **J** shows storage/app-folder estimates in GB and **automatically recycles duplicate loose downloads**, keeping one copy after comparing extensions and all data streams. Other cleanup candidates require selection.
+- Files go only to the Recycle Bin; space is not freed until it is emptied. Storage Sense or other software can empty it independently. System/update caches and pending crash reports are excluded.
+- Each action ends with a short summary. **P** summarizes the session. Detailed results and selected registry backups are in `logs/`; check failures and restart notices before rerunning.
 
-Both presets enable System Protection on the Windows drive and verify a new, named restore point before optimization. The checkpoint frequency override is temporary; existing restore points and storage limits are preserved. If setup or creation fails, a continue/cancel choice defaults to cancel. Individual actions do not create restore points. Apps are preserved; disabling Xbox services requires a separate selection.
+## Source map
 
-Both presets default to disabling Game DVR recording (answer No to preserve existing capture settings; Game Bar stays installed) and restore normal TCP receive-window growth. Both enable windowed-game optimization for compatible DX10/DX11 games, remove forced debug timer overrides, and **disable memory integrity (HVCI) by default**. This reduces security and may block anti-cheat protected games. [M] can re-enable it; restart afterward. Policy/UEFI enforcement is not bypassed. Other virtualization/VBS services are left unchanged.
+- `win11_nontouch_gaming_optimiser.bat`: menus, elevation, presets and tweak commands.
+- `optimizer-operations.ps1`: verified operations, restore points, result journal and summaries. Dot-source with `-NoRun` for tests.
+- `optimizer-cleanup.ps1`: storage estimates, candidate selection, duplicate checks and Shell recycling.
 
-[G] reports current/highest enumerated refresh rates at the current resolution and saved GPU preferences. It never changes resolution or guesses which GPU a game actually uses. Review Windows Graphics/Advanced display settings for per-game exceptions.
+## Tests
 
-Page files are system-managed at every RAM size. Portable/Modern Standby PCs use the AC Best performance preference while preserving their power plan, battery mode and hibernation. Other desktops retain the Ultimate/High Performance path. Sleep timeouts and hibernation are left unchanged.
-
-Cleanup never permanently deletes files or uninstalls apps. It skips system/application directories, known OneDrive paths, links, cloud placeholders and files that changed after scanning. Failed recycling is not retried as deletion. Files still occupy disk space until you empty the Recycle Bin; Storage Sense or other cleanup tools can empty it independently. Windows update caches, component cleanup and shader caches are excluded.
-
-## Results and recovery
-
-Logs and `operation_results_<timestamp>.jsonl` are saved in `logs/`. Results distinguish **Applied**, **AlreadyConfigured**, **Unsupported**, **Failed**, **RestartRequired**, and **Unverified**. Unverified means the command succeeded without an independent state check. Results cover the current session, not changes made afterward by Windows or other software.
-
-After each action, a brief summary shows confirmed changes, recycled files/GB, and restart or review needs. **P** summarizes the whole session; full details remain in the logs. Review failures and restart-required entries before rerunning. Use the individual menu actions when only part of a run needs repeating.
-
-**Recovery:** use **R** (or `rstrui.exe`) and select the logged Gaming Optimizer checkpoint. Restore points can expire and are not full backups. **Undo** restores the saved mouse settings and resets selected settings to defaults; it does not fully reverse optimization. Registry exports cover selected keys only. Full recovery, including deleted files and removed apps, requires an independent backup made beforehand.
-
-## Development
-
-Requires Windows, Windows PowerShell 5.1 (including Out-GridView for deeper cleanup), and Python 3.9+ for tests; no third-party Python packages.
+Windows, Windows PowerShell 5.1, and Python 3.9+; no Python dependencies. Deeper cleanup also requires `Out-GridView`.
 
 ```powershell
-python -m unittest discover -s tests -p "test_*.py" -v
+python -m unittest discover -s tests -p "test_*.py" -q
 ```
 
-Tests mock system mutations and use disposable file fixtures. Set `OPTIMIZER_TEST_RECYCLE=1` to also test recycling and restoring a uniquely named generated fixture through the real Recycle Bin. A read-only registry check verifies provider integration. They test behavior and reporting, not gaming performance.
+System mutations are mocked; file tests use disposable fixtures. To include the real Recycle Bin round-trip test (generated files only):
 
-[MIT license](LICENSE).
+```powershell
+$env:OPTIMIZER_TEST_RECYCLE = '1'
+python -m unittest discover -s tests -p "test_*.py" -q
+Remove-Item Env:OPTIMIZER_TEST_RECYCLE
+```

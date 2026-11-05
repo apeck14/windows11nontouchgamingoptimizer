@@ -1,4 +1,4 @@
-"""Exercise the real result engine with mocked Windows mutations."""
+"""Behavior tests with mocked system changes; real fixture recycling is opt-in."""
 import json
 import os
 from pathlib import Path
