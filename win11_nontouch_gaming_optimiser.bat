@@ -228,13 +228,7 @@ call :RunOperation Native netsh interface tcp set global autotuninglevel=normal
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpNoDelay /t REG_DWORD /d 1 /f
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpAckFrequency /t REG_DWORD /d 1 /f
 
-REM Delivery Optimization (P2P updates) off for latency + bandwidth stability
-call :RunOperation Service sc stop DoSvc
-call :RunOperation Service sc config DoSvc start= disabled
-for %%T in ("\Microsoft\Windows\Delivery Optimization\Maintenance" "\Microsoft\Windows\Delivery Optimization\Download") do (
-    call :RunOperation Task schtasks /Change /TN "%%~T" /Disable
-)
-call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" /v DODownloadMode /t REG_DWORD /d 0 /f
+call :RunOperation Delivery Configure
 
 call :Log "Safe network changes attempted; see results"
 exit /b 0
@@ -375,10 +369,11 @@ exit /b 0
 call :Log "Optimizing services/indexing"
 if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%OPTIMIZING SERVICES AND TELEMETRY%CLR_RESET%
 if not defined OPTIMIZER_FULL_RUN echo [*] Reducing background services, indexing, telemetry, and tips...
-for %%S in (SysMain WSearch DiagTrack dmwappushservice RetailDemo RemoteRegistry MapsBroker TrkWks) do (
+for %%S in (SysMain DiagTrack dmwappushservice RetailDemo RemoteRegistry MapsBroker TrkWks) do (
     call :RunOperation Service sc stop %%S
     call :RunOperation Service sc config %%S start= disabled
 )
+call :RunOperation Service sc stop WSearch
 call :RunOperation Service sc config WSearch start= demand
 for %%T in (
     "\Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser"
@@ -432,7 +427,6 @@ call :RunOperation Native netsh interface tcp set global autotuninglevel=normal
 call :RunOperation Native netsh interface tcp set global ecncapability=disabled
 call :RunOperation Native netsh interface tcp set global rss=enabled
 call :RunOperation Native netsh interface tcp set global rsc=disabled
-call :RunOperation Native netsh interface tcp set global chimney=disabled
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpTimedWaitDelay /t REG_DWORD /d 30 /f
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v MaxUserPort /t REG_DWORD /d 65534 /f
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v Tcp1323Opts /t REG_DWORD /d 1 /f
@@ -440,13 +434,7 @@ call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpi
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpAckFrequency /t REG_DWORD /d 1 /f
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v DefaultTTL /t REG_DWORD /d 64 /f
 
-call :RunOperation Service sc stop DoSvc
-call :RunOperation Service sc config DoSvc start= disabled
-call :RunOperation Task schtasks /Change /TN "\Microsoft\Windows\Delivery Optimization\Maintenance" /Disable
-call :RunOperation Task schtasks /Change /TN "\Microsoft\Windows\Delivery Optimization\Download" /Disable
-call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" /v DODownloadMode /t REG_DWORD /d 0 /f
-call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" /v DOMaxUploadBandwidth /t REG_DWORD /d 0 /f
-call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" /v DOMaxUploadPercentage /t REG_DWORD /d 0 /f
+call :RunOperation Delivery Configure
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces" /v TcpAckFrequency /t REG_DWORD /d 1 /f
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces" /v TCPNoDelay /t REG_DWORD /d 1 /f
 call :Log "Network changes attempted; see results"
@@ -460,7 +448,6 @@ call :RunOperation Native netsh interface tcp set global autotuninglevel=normal
 call :RunOperation Native netsh interface tcp set global ecncapability=default
 call :RunOperation Native netsh interface tcp set global rss=enabled
 call :RunOperation Native netsh interface tcp set global rsc=default
-call :RunOperation Native netsh interface tcp set global chimney=default
 for %%V in (TcpTimedWaitDelay MaxUserPort Tcp1323Opts TcpNoDelay TcpAckFrequency DefaultTTL) do (
     call :RunOperation Registry reg delete "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v %%V /f
 )

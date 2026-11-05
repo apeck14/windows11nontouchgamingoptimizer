@@ -213,26 +213,97 @@ if($script:messages[1].Text -notmatch 'ProtectedService' -or $script:messages[1]
 if((Get-Content -Raw $env:LOG_FILE) -notmatch 'Raw native dump'){throw 'Diagnostic log lost details'}
 ''')
 
-    def test_power_plan_creation_and_activation_are_read_back(self):
+    def test_power_plan_reuses_active_copy_removes_only_duplicates_and_is_repeatable(self):
         rows, _ = self.run_case(r'''
 function Get-PowerCapabilities {@{ModernStandby=$false;Portable=$false}}
-$script:active=''
-$guid='11111111-2222-3333-4444-555555555555'
+$a='11111111-1111-1111-1111-111111111111'; $b='22222222-2222-2222-2222-222222222222'; $c='33333333-3333-3333-3333-333333333333'
+$script:plans=@(
+    [pscustomobject]@{Id=$a;Name='Ultimate Performance';Active=$true},
+    [pscustomobject]@{Id=$b;Name='Ultimate Performance';Active=$false},
+    [pscustomobject]@{Id=$c;Name='My custom gaming plan';Active=$false}
+)
+function Get-PerformancePlans {$script:plans}
 function Invoke-NativeOperation {param($Program,$Arguments)
-    $output=''
-    switch($Arguments[0]) {
-        '-duplicatescheme' {$output="Power Scheme GUID: $guid (Ultimate Performance)"}
-        '/list' {$output=$guid}
-        '/getactivescheme' {$output=$script:active}
-        '-setactive' {$script:active=$Arguments[1]}
-        default {throw 'Unexpected command'}
+    switch($Arguments[0]){
+        '/getactivescheme' {return [pscustomobject]@{Code=0;Output=$a}}
+        '/delete' {if($Arguments[1] -ne $b){throw 'Unsafe plan deletion'}; $script:plans=@($script:plans|Where-Object Id -ne $b)}
+        default {throw 'Unexpected mutation: duplicate or active plan should be reused'}
     }
-    [pscustomobject]@{Code=0;Output=$output}
+    [pscustomobject]@{Code=0;Output=''}
 }
 $null=Invoke-Operation 'Plan Ultimate'
+$null=Invoke-Operation 'Plan Ultimate'
+if($script:plans.Count -ne 2 -or $script:plans.Id -notcontains $c){throw 'Custom plan lost'}
 ''')
-        self.assertEqual([r['Status'] for r in rows], ['Applied','Applied'])
-        self.assertTrue(all(r['Verified'] for r in rows))
+        self.assertEqual([r['Status'] for r in rows], ['AlreadyConfigured','Applied','AlreadyConfigured'])
+
+    def test_power_plan_is_created_only_when_missing(self):
+        rows, _ = self.run_case(r'''
+function Get-PowerCapabilities {@{ModernStandby=$false;Portable=$false}}
+$script:plans=@(); $script:active='381b4222-f694-41f0-9685-ff5bb260df2e'; $script:created=0
+function Get-PerformancePlans {$script:plans}
+function Invoke-NativeOperation {param($Program,$Arguments)
+    switch($Arguments[0]) {
+        '-duplicatescheme' {$script:created++; $script:plans=@([pscustomobject]@{Id=$Arguments[2];Name='Temporary';Active=$false})}
+        '-changename' {$script:plans[0].Name=$Arguments[2]}
+        '/getactivescheme' {return [pscustomobject]@{Code=0;Output=$script:active}}
+        '-setactive' {$script:active=$Arguments[1]; $script:plans[0].Active=$true}
+        default {throw 'Unexpected operation'}
+    }
+    [pscustomobject]@{Code=0;Output=''}
+}
+$null=Invoke-Operation 'Plan Ultimate'
+$null=Invoke-Operation 'Plan Ultimate'
+if($script:created -ne 1 -or $script:plans[0].Name -ne 'Gaming Optimizer'){throw 'Plan was not reused'}
+''')
+        self.assertEqual([r['Status'] for r in rows], ['Applied','Applied','AlreadyConfigured'])
+
+    def test_power_plan_activation_failure_never_deletes_other_plans(self):
+        rows, _ = self.run_case(r'''
+function Get-PowerCapabilities {@{ModernStandby=$false;Portable=$false}}
+function Get-PerformancePlans {@(
+    [pscustomobject]@{Id='11111111-1111-1111-1111-111111111111';Name='Ultimate Performance';Active=$false},
+    [pscustomobject]@{Id='22222222-2222-2222-2222-222222222222';Name='Ultimate Performance';Active=$false}
+)}
+function Invoke-GenericChange {throw 'Activation denied'}
+function Invoke-NativeOperation {throw 'Must not delete before activation succeeds'}
+$null=Invoke-Operation 'Plan Ultimate'
+''')
+        self.assertEqual(rows[0]['Status'], 'Failed')
+        self.assertIn('Activation denied', rows[0]['Detail'])
+
+    def test_delivery_optimization_preserves_available_service_and_repairs_disabled(self):
+        rows, _ = self.run_case(r'''
+function Invoke-RegistryChange {param($Tokens)
+    if(($Tokens -join ' ') -notmatch 'DODownloadMode /t REG_DWORD /d 0'){throw 'Wrong sharing policy'}
+    Write-OperationResult AlreadyConfigured 'Sharing policy' 'off' $true
+}
+$script:startup='demand'
+function Get-ServiceStartup {param($Name) $script:startup}
+function Invoke-ServiceChange {param($Tokens)
+    if(($Tokens -join ' ') -ne 'sc config DoSvc start= delayed-auto'){throw 'Unexpected service mutation'}
+    $script:startup='delayed-auto'; Write-OperationResult Applied 'Service repaired' 'available' $true
+}
+$null=Invoke-Operation 'Delivery Configure'
+$script:startup='disabled'; $null=Invoke-Operation 'Delivery Configure'
+''')
+        self.assertEqual([r['Status'] for r in rows], ['AlreadyConfigured','AlreadyConfigured','AlreadyConfigured','Applied'])
+
+    def test_registry_export_verifies_content_without_skipping_overwrite(self):
+        rows, _ = self.run_case(r'''
+$path=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'backup [one].reg'
+$script:valid=$true
+function Invoke-NativeOperation {param($Program,$Arguments)
+    $content=if($script:valid){"Windows Registry Editor Version 5.00`r`n`r`n[HKEY_CURRENT_USER\Example]`r`n"}else{"Windows Registry Editor Version 5.00`r`n[HKEY_CURRENT_USER\Wrong]"}
+    [IO.File]::WriteAllText($path,$content,[Text.Encoding]::Unicode)
+    [pscustomobject]@{Code=0;Output=''}
+}
+$op='Native reg export "HKCU\Example" "'+$path+'" /y'
+$null=Invoke-Operation $op
+$script:valid=$false; $null=Invoke-Operation $op
+''')
+        self.assertEqual([r['Status'] for r in rows], ['Applied','Failed'])
+        self.assertTrue(rows[0]['Verified'])
 
     def test_power_setting_uses_effective_value_without_rewriting_it(self):
         rows, _ = self.run_case(r'''

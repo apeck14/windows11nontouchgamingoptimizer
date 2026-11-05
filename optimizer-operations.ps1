@@ -265,6 +265,23 @@ function Get-ACPowerMode { Initialize-PowerApi; [OptimizerPower]::ReadACMode() }
 function Set-ACPowerMode([guid]$Mode) { Initialize-PowerApi; [OptimizerPower]::SetACMode($Mode) }
 function Get-ACPowerValue([guid]$Scheme,[guid]$Group,[guid]$Setting) { Initialize-PowerApi; [OptimizerPower]::ReadACValue($Scheme,$Group,$Setting) }
 
+function Set-DeliveryOptimization {
+    Invoke-RegistryChange @('reg','add','HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization','/v','DODownloadMode','/t','REG_DWORD','/d','0','/f')
+    if ((Get-ServiceStartup 'DoSvc') -eq 'disabled') {
+        Invoke-ServiceChange @('sc','config','DoSvc','start=','delayed-auto')
+    } else {
+        Write-OperationResult AlreadyConfigured 'Delivery Optimization service' 'Available to Windows; startup type preserved.' $true
+    }
+}
+
+function Get-PerformancePlans {
+    Get-CimInstance -Namespace root/cimv2/power -ClassName Win32_PowerPlan -ErrorAction Stop | ForEach-Object {
+        $id = [regex]::Match($_.InstanceID,'[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}','IgnoreCase').Value
+        if (-not $id) { throw 'Could not identify a power plan.' }
+        [pscustomobject]@{Id=$id;Name=$_.ElementName;Active=$_.IsActive}
+    }
+}
+
 function Invoke-PerformancePlan {
     $caps = Get-PowerCapabilities
     if ($caps.ModernStandby -or $caps.Portable) {
@@ -275,22 +292,28 @@ function Invoke-PerformancePlan {
         Write-OperationResult $status 'AC power mode' 'Best performance preference verified. Existing power plan and battery mode preserved; Windows/OEM thermal limits still apply.' $true
         return
     }
-    $template = 'e9a42b02-d5df-448d-aa00-03f14749eb61'
-    $result = Invoke-NativeOperation powercfg @('-duplicatescheme',$template)
-    $guid = $template
-    if ($result.Code -eq 0 -and $result.Output -match '[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}') {
-        $guid = $Matches[0]
-        $list = Invoke-NativeOperation powercfg @('/list')
-        if ($list.Code -eq 0 -and $list.Output -match [regex]::Escape($guid)) {
-            Write-OperationResult Applied 'Create performance power plan' "Created and verified $guid." $true
-        } else { throw 'Power plan creation returned success but the plan is not listed.' }
-    } else {
-        Write-OperationResult Failed 'Create performance power plan' "Exit $($result.Code): $($result.Output.Trim()). Trying existing plan, then High Performance."
+    $plans = @(Get-PerformancePlans)
+    $copies = @($plans | Where-Object Name -in @('Ultimate Performance','Gaming Optimizer'))
+    $keeper = $copies | Sort-Object Active -Descending | Select-Object -First 1
+    if (-not $keeper) {
+        $guid = 'b5414e12-0874-43e7-8a39-4618bfcf9a45'
+        if ($plans.Id -contains $guid) { throw 'Optimizer power-plan ID belongs to another named plan; left untouched.' }
+        $created = Invoke-NativeOperation powercfg @('-duplicatescheme','e9a42b02-d5df-448d-aa00-03f14749eb61',$guid)
+        if ($created.Code -ne 0) {
+            Write-OperationResult Failed 'Create performance power plan' $created.Output.Trim()
+            Invoke-GenericChange @('powercfg','-setactive','SCHEME_MIN'); return
+        }
+        $named = Invoke-NativeOperation powercfg @('-changename',$guid,'Gaming Optimizer')
+        if ($named.Code -ne 0) { throw 'Could not name optimizer power plan.' }
+        $keeper = Get-PerformancePlans | Where-Object Id -eq $guid
+        if (-not $keeper) { throw 'Created power plan could not be verified.' }
+        Write-OperationResult Applied 'Create performance power plan' "Created and verified $guid." $true
     }
-    try { Invoke-GenericChange @('powercfg','-setactive',$guid) }
-    catch {
-        Write-OperationResult Failed "Activate power plan $guid" $_.Exception.Message
-        Invoke-GenericChange @('powercfg','-setactive','SCHEME_MIN')
+    Invoke-GenericChange @('powercfg','-setactive',$keeper.Id)
+    foreach ($copy in @($copies | Where-Object Id -ne $keeper.Id)) {
+        $removed = Invoke-NativeOperation powercfg @('/delete',$copy.Id)
+        if ($removed.Code -ne 0 -or @(Get-PerformancePlans | Where-Object Id -eq $copy.Id).Count) { throw "Could not remove duplicate performance plan $($copy.Id)." }
+        Write-OperationResult Applied 'Remove duplicate performance plan' $copy.Id $true
     }
 }
 
@@ -522,6 +545,13 @@ function Invoke-GenericChange {
     $result = Invoke-NativeOperation $Tokens[0] $Tokens[1..($Tokens.Count-1)]
     if ($result.Code -eq 3010) { Write-OperationResult RestartRequired ($Tokens -join ' ') 'Restart required; operation may be deferred.'; return }
     if ($result.Code -ne 0) { throw "Exit $($result.Code): $($result.Output.Trim())" }
+    if ($name -eq 'reg' -and $Tokens[1] -eq 'export') {
+        $export = Get-Content -LiteralPath $Tokens[3] -Raw -ErrorAction Stop
+        $key = $Tokens[2] -replace '^HKCU\\','HKEY_CURRENT_USER\' -replace '^HKLM\\','HKEY_LOCAL_MACHINE\'
+        if ($export -notmatch '^Windows Registry Editor Version 5\.00' -or $export -notmatch ('(?m)^\['+[regex]::Escape($key)+'\]\r?$')) { throw 'Registry export is missing its header or requested root key.' }
+        Write-OperationResult Applied ($Tokens -join ' ') 'Registry export format and root key verified.' $true
+        return
+    }
     $after = Get-NativeDesiredState $Tokens
     if ($after -eq $false) { throw 'Command succeeded but read-back does not match.' }
     if ($null -eq $after) {
@@ -539,7 +569,7 @@ function Show-OperationSummary {
     $scope = if ($env:OPTIMIZER_ACTION_ID) {'this action'} else {'this session'}
     Write-Host "`nSUMMARY - $scope" -ForegroundColor Cyan
     $changed = @($entries | Where-Object { $_.Verified -and $_.Status -in @('Applied','RestartRequired') })
-    $areas = @($changed | Where-Object { $_.Operation -notlike 'Recycle *' -and $_.Operation -ne 'System restore point' } | ForEach-Object {
+    $areas = @($changed | Where-Object { $_.Operation -notlike 'Recycle *' -and $_.Operation -notlike 'reg export *' -and $_.Operation -ne 'System restore point' } | ForEach-Object {
         switch -Regex ($_.Operation) {
             '^Service |^Task ' {'Services & background tasks'; break}
             'GameBar|GameDVR|GameConfigStore|GraphicsDrivers|DirectX|Mouse|mouclass|kbdclass' {'Gaming, graphics & input'; break}
@@ -592,6 +622,7 @@ function Invoke-Operation {
             Memory { Invoke-MemoryChange $tokens[1] ($tokens[2] -eq '1') }
             Pagefile { Invoke-PagefileChange $tokens[1] }
             Plan { Invoke-PerformancePlan }
+            Delivery { Set-DeliveryOptimization }
             Restore { New-OptimizerRestorePoint }
             Windowed { Enable-WindowedOptimizations }
             Integrity { Set-MemoryIntegrity ($tokens[1] -eq 'On') }

@@ -204,6 +204,19 @@ class Regressions(unittest.TestCase):
             self.assertIn('autotuninglevel=normal', trace)
             self.assertNotIn('autotuninglevel=highlyrestricted', trace)
 
+    def test_network_and_search_avoid_redundant_or_obsolete_changes(self):
+        for name in ['ApplyNetworkTweaksSafe','ApplyNetworkTweaks']:
+            result, trace, _ = self.run_batch(mock_commands(routine(name)), name, extra=LOG + MOCK)
+            self.assertEqual(result.returncode, 0)
+            self.assertIn('Delivery Configure', trace)
+            self.assertNotIn('DoSvc', trace)
+            self.assertNotIn('chimney=', trace)
+        result, trace, _ = self.run_batch(mock_commands(routine('OptimizeServices')), 'OptimizeServices', extra=LOG + MOCK)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('sc stop WSearch', trace)
+        self.assertIn('sc config WSearch start= demand', trace)
+        self.assertNotIn('sc config WSearch start= disabled', trace)
+
     def test_memory_and_pagefile_routines_complete_for_all_ram_ranges(self):
         for name in ['OptimizeMemory', 'OptimizePageFile']:
             for ram in (['', '4', '8', '16', '32'] if name == 'OptimizePageFile' else ['4', '8', '32']):
