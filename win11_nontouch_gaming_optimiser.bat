@@ -88,7 +88,8 @@ echo.
 echo    %CLR_MENU%[1 / F]%CLR_RESET% FULL OPTIMIZATION - All gaming tweaks in one run
 echo    %CLR_MENU%[2]%CLR_RESET% RECOMMENDED - Core essentials only (faster)
 echo.
-echo    %CLR_MENU%[3]%CLR_RESET% Create system restore point
+echo    %CLR_MENU%[3]%CLR_RESET% Set up protection and create restore point
+echo    %CLR_MENU%[R]%CLR_RESET% Open Windows System Restore
 echo    %CLR_MENU%[4]%CLR_RESET% Debloat Windows 11 (remove consumer/OEM apps)
 echo    %CLR_MENU%[5]%CLR_RESET% Disable touchscreen, pen, and ink features
 echo    %CLR_MENU%[6]%CLR_RESET% Gaming settings - includes memory integrity OFF
@@ -116,6 +117,7 @@ if /I "%choice%"=="1" call :FullOptimization & call :PauseReturn & goto Menu
 if /I "%choice%"=="F" call :FullOptimization & call :PauseReturn & goto Menu
 if /I "%choice%"=="2" call :RunRecommended & call :PauseReturn & goto Menu
 if /I "%choice%"=="3" call :CreateRestorePoint & call :PauseReturn & goto Menu
+if /I "%choice%"=="R" start "" "%SystemRoot%\System32\rstrui.exe" & goto Menu
 if /I "%choice%"=="4" call :Debloat & call :PauseReturn & goto Menu
 if /I "%choice%"=="5" call :DisableTouchFeatures & call :PauseReturn & goto Menu
 if /I "%choice%"=="6" call :GamingTweaksMenu & call :PauseReturn & goto Menu
@@ -254,18 +256,15 @@ if errorlevel 1 (
     call :Log "Restore point prerequisites missing"
     exit /b 1
 )
-echo [*] Creating system restore point...
-"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "Try { Checkpoint-Computer -Description 'NonTouchGamingOptimizer' -RestorePointType 'MODIFY_SETTINGS' -ErrorAction Stop -WarningAction Stop; exit 0 } Catch { Write-Warning $_; exit 1 }" >> "%LOG_FILE%" 2>&1
+echo [*] Enabling System Protection and creating a verified restore point...
+call :RunOperation Restore Create
 if errorlevel 1 (
-    echo [!] Restore point was not created. No optimizations applied.
-    echo     Enable System Protection and check the log for the exact error.
-    echo     Windows may also limit creation if a recent restore point exists.
-    call :Log "Restore point creation failed"
+    echo [!] No new restore point was verified. Check the log for the exact error.
+    echo     Open SystemPropertiesProtection.exe to review protection and disk space.
+    call :Log "Restore point setup or creation failed"
     exit /b 1
 )
-echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
-echo [+] Restore point created successfully.
-call :Log "Restore point created"
+echo [+] Restore point created and verified. Use menu R to open System Restore.
 exit /b 0
 
 :ApplyNetworkTweaksSafe

@@ -230,6 +230,47 @@ $null=Invoke-Operation ('Registry reg add "'+$path+'" /v '+$name+' /t '+$type+' 
 ''')
         self.assertEqual([r['Status'] for r in rows], ['AlreadyConfigured'])
 
+    def test_restore_creation_verifies_new_point_and_restores_frequency(self):
+        for original, outcome in [('absent','ok'), ('existing','ok'), ('existing','error'), ('absent','missing')]:
+            with self.subTest(original=original, outcome=outcome):
+                rows, _ = self.run_case(r'''
+$script:original='ORIGINAL'; $script:outcome='OUTCOME'; $script:description=''; $script:writes=@(); $script:removed=$false
+function Get-RegistryState {param($Path,$Name)
+    if($Name -eq 'SystemRestorePointCreationFrequency' -and $script:original -eq 'existing'){@{Exists=$true;Type='DWord';Value=1440}}else{@{Exists=$false}}
+}
+function Enable-ComputerRestore {param($Drive,$ErrorAction,$WarningAction) if($Drive -ne ($env:SystemDrive+'\')){throw 'Wrong drive'}}
+function New-ItemProperty {param($LiteralPath,$Name,$PropertyType,$Value,[switch]$Force,$ErrorAction) $script:writes+=,$Value}
+function Remove-ItemProperty {param($LiteralPath,$Name,$ErrorAction) $script:removed=$true}
+function Get-CimInstance {param($Namespace,$ClassName,$ErrorAction)
+    [pscustomobject]@{SequenceNumber=1;Description='Old checkpoint'}
+    if($script:description -and $script:outcome -eq 'ok'){[pscustomobject]@{SequenceNumber=2;Description=$script:description}}
+}
+function Invoke-CimMethod {param($Namespace,$ClassName,$MethodName,$Arguments,$ErrorAction)
+    if($Arguments.EventType -ne 100 -or $Arguments.RestorePointType -ne 12){throw 'Wrong restore event'}
+    $script:description=$Arguments.Description
+    if($script:outcome -eq 'error'){throw 'Simulated snapshot failure'}
+    [pscustomobject]@{ReturnValue=0}
+}
+$null=Invoke-Operation 'Restore Create'
+if($script:writes[0] -ne 0){throw 'Frequency not temporarily disabled'}
+if($script:original -eq 'existing'){
+    if($script:writes.Count -ne 2 -or $script:writes[1] -ne 1440 -or $script:removed){throw 'Existing frequency not restored'}
+}elseif(-not $script:removed){throw 'Temporary frequency not removed'}
+'''.replace('ORIGINAL', original).replace('OUTCOME', outcome))
+                self.assertEqual(rows[0]['Status'], 'Applied' if outcome == 'ok' else 'Failed')
+                if outcome == 'ok':
+                    self.assertTrue(rows[0]['Verified'])
+                    self.assertIn('#2:', rows[0]['Detail'])
+
+    def test_restore_does_not_override_disabling_policy(self):
+        rows, _ = self.run_case(r'''
+function Get-RegistryState {param($Path,$Name) @{Exists=$true;Value=1}}
+function Enable-ComputerRestore {throw 'Must not enable protection against policy'}
+$null=Invoke-Operation 'Restore Create'
+''')
+        self.assertEqual(rows[0]['Status'], 'Failed')
+        self.assertIn('disabled by policy', rows[0]['Detail'])
+
     def test_windowed_flag_preserves_other_graphics_preferences(self):
         rows, _ = self.run_case(r'''
 function Get-ItemPropertyValue {param($Path,$Name,$ErrorAction) '26300'}

@@ -88,7 +88,7 @@ class Regressions(unittest.TestCase):
         self.assertFalse(set(x.lower() for x in targets) - set(x.lower() for x in labels))
 
     def test_restore_success_and_failures(self):
-        body = re.sub(r'^"%POWERSHELL%"[^\n]*', 'call :Checkpoint',
+        body = re.sub(r'^call :RunOperation Restore Create', 'call :Checkpoint',
                       routine('CreateRestorePoint'), flags=re.M)
         for service_code, checkpoint_code in [(0, 0), (1, 0), (0, 1)]:
             with self.subTest(services=service_code, checkpoint=checkpoint_code):
@@ -96,7 +96,7 @@ class Regressions(unittest.TestCase):
                     stub('EnsureShadowServices', service_code) + stub('Checkpoint', checkpoint_code))
                 self.assertEqual(result.returncode, int(bool(service_code or checkpoint_code)))
                 self.assertEqual('Checkpoint' in trace, service_code == 0)
-                self.assertEqual('created successfully' in result.stdout,
+                self.assertEqual('created and verified' in result.stdout,
                                  service_code == checkpoint_code == 0)
 
     def test_sequences_stop_before_mutations_on_battery_or_cancelled_preparation(self):

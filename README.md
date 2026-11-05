@@ -8,10 +8,11 @@ Extract the repository ZIP, keeping `win11_nontouch_gaming_optimiser.bat` and `o
 
 - **1/F Full:** all routines, including aggressive networking and advanced GPU/storage settings.
 - **2 Recommended:** debloat, gaming settings, services, safe networking, visuals and core parking.
+- **3:** set up System Protection and create a restore point. **R:** open System Restore.
 - **G:** display refresh/GPU checks. **M:** memory integrity on/off.
 - **P:** session operation results. **V:** limited live configuration checks.
 
-Both presets attempt a restore point; failure offers a continue/cancel choice, defaulting to cancel. Individual actions do not create restore points. Spotify is preserved; disabling Xbox services requires a separate selection.
+Both presets enable System Protection on the Windows drive and verify a new, named restore point before optimization. The checkpoint frequency override is temporary; existing restore points and storage limits are preserved. If setup or creation fails, a continue/cancel choice defaults to cancel. Individual actions do not create restore points. Spotify is preserved; disabling Xbox services requires a separate selection.
 
 Both presets enable windowed-game optimization for compatible DX10/DX11 games, remove forced debug timer overrides, and **disable memory integrity (HVCI) by default**. This reduces security and may block anti-cheat protected games. [M] can re-enable it; restart afterward. Policy/UEFI enforcement is not bypassed. Other virtualization/VBS services are left unchanged.
 
@@ -22,6 +23,8 @@ Both presets enable windowed-game optimization for compatible DX10/DX11 games, r
 Logs and `operation_results_<timestamp>.jsonl` are saved in `logs/`. Results distinguish **Applied**, **AlreadyConfigured**, **Unsupported**, **Failed**, **RestartRequired**, and **Unverified**. Unverified means the command succeeded without an independent state check. Results cover the current session, not changes made afterward by Windows or other software.
 
 Review failures and restart-required entries before rerunning. Pending Windows servicing requires a restart before retrying deferred cleanup. Use the individual menu actions when only part of a run needs repeating.
+
+**System Restore is not a full backup:** use **R** (or `rstrui.exe`) and select the logged Gaming Optimizer checkpoint. Windows can expire restore points; deleted files and every removed app are not guaranteed recoverable. Full recovery requires a separate system-image/data backup made before optimization.
 
 **Undo is partial:** it resets selected settings to chosen defaults, not your original configuration. Registry exports cover selected keys only. Removed apps and deleted files are not recovered. Keep an independent backup.
 

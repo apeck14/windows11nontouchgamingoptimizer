@@ -248,6 +248,43 @@ function Invoke-PerformancePlan {
     }
 }
 
+function New-OptimizerRestorePoint {
+    $policy = 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\SystemRestore'
+    foreach ($name in @('DisableSR','DisableConfig')) {
+        $state = Get-RegistryState $policy $name
+        if ($state.Exists -and $state.Value -eq 1) { throw 'System Protection is disabled by policy. Contact your administrator.' }
+    }
+    Enable-ComputerRestore -Drive ($env:SystemDrive + '\') -ErrorAction Stop -WarningAction Stop
+    $before = @(Get-CimInstance -Namespace root/default -ClassName SystemRestore -ErrorAction Stop | ForEach-Object SequenceNumber)
+    $description = 'Gaming Optimizer - ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' - ' + [guid]::NewGuid().ToString('N').Substring(0,8)
+    $path = 'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore'
+    $key = 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore'
+    $name = 'SystemRestorePointCreationFrequency'
+    $frequency = Get-RegistryState $path $name
+    if ($frequency.Exists -and $frequency.Type -ne 'DWord') { throw 'Unexpected restore-point frequency registry type; left unchanged.' }
+    # Permit a fresh pre-change checkpoint even if Windows created one today.
+    # Restore the user's frequency immediately, including on failure.
+    try {
+        New-ItemProperty -LiteralPath $key -Name $name -PropertyType DWord -Value 0 -Force -ErrorAction Stop | Out-Null
+        $result = Invoke-CimMethod -Namespace root/default -ClassName SystemRestore -MethodName CreateRestorePoint -Arguments @{
+            Description=$description; RestorePointType=[uint32]12; EventType=[uint32]100
+        } -ErrorAction Stop
+        if ($result.ReturnValue -ne 0) { throw "Windows restore-point creation returned $($result.ReturnValue). Check System Protection and available disk space." }
+        $point = @(Get-CimInstance -Namespace root/default -ClassName SystemRestore -ErrorAction Stop |
+            Where-Object { $_.Description -eq $description -and $_.SequenceNumber -notin $before })
+        if ($point.Count -ne 1) { throw 'Windows did not expose a new matching restore point. No checkpoint has been verified.' }
+    } finally {
+        if ($frequency.Exists) {
+            New-ItemProperty -LiteralPath $key -Name $name -PropertyType DWord -Value $frequency.Value -Force -ErrorAction Stop | Out-Null
+        } else {
+            Remove-ItemProperty -LiteralPath $key -Name $name -ErrorAction Stop
+        }
+    }
+    Write-OperationResult Applied 'System restore point' "Verified #$($point[0].SequenceNumber): $description. Open System Restore with menu R or rstrui.exe." $true
+    Write-Host 'System Protection is enabled on the Windows drive. Restore points can expire as Windows reclaims space.'
+    Write-Host 'System Restore is not a full backup: deleted files and every removed app are not guaranteed recoverable.'
+}
+
 function Enable-WindowedOptimizations {
     $build = [int](Get-ItemPropertyValue 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name CurrentBuildNumber -ErrorAction Stop)
     if ($build -lt 22621) {
@@ -491,6 +528,7 @@ function Invoke-Operation {
             Memory { Invoke-MemoryChange $tokens[1] ($tokens[2] -eq '1') }
             Pagefile { Invoke-PagefileChange $tokens[1] }
             Plan { Invoke-PerformancePlan }
+            Restore { New-OptimizerRestorePoint }
             Windowed { Enable-WindowedOptimizations }
             Integrity { Set-MemoryIntegrity ($tokens[1] -eq 'On') }
             Graphics { Show-GraphicsConfiguration }
