@@ -4,6 +4,7 @@ function Initialize-RecycleApi {
     if ('OptimizerRecycle' -as [type]) { return }
     Add-Type -TypeDefinition @'
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
 public static class OptimizerRecycle {
     [ComImport, Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -34,14 +35,21 @@ public static class OptimizerRecycle {
     }
     [DllImport("shell32.dll", CharSet=CharSet.Unicode, PreserveSig=false)]
     static extern void SHCreateItemFromParsingName(string path, IntPtr context, ref Guid iid, out IShellItem item);
-    public static void File(string path) {
+    public static void File(string path) { Recycle(path, false); }
+    public static void EmptyFolder(string path) { Recycle(path, true); }
+    static void Recycle(string path, bool emptyFolder) {
         IFileOperation operation=null; IShellItem item=null;
         try {
             operation=(IFileOperation)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("3AD05575-8857-4850-9277-11B85BDB8E09")));
             // Recycle, record undo, fail on errors, never silently confirm permanent deletion.
-            operation.SetOperationFlags(0x00080000 | 0x20000000 | 0x00100000 | 0x0400 | 0x4000 | 0x0004);
+            operation.SetOperationFlags(0x00080000 | 0x20000000 | 0x00100000 | 0x0400 | 0x4000 | 0x0004 | (emptyFolder ? 0x1000u : 0u));
             Guid iid=new Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE");
             SHCreateItemFromParsingName(path, IntPtr.Zero, ref iid, out item);
+            if (emptyFolder) {
+                using (var entries = Directory.EnumerateFileSystemEntries(path).GetEnumerator()) {
+                    if (entries.MoveNext()) throw new IOException("Folder is no longer empty.");
+                }
+            }
             operation.DeleteItem(item, IntPtr.Zero);
             operation.PerformOperations();
             bool aborted; operation.GetAnyOperationsAborted(out aborted);
@@ -427,7 +435,57 @@ function Invoke-RecycleCleanup([string]$Scope) {
     }
     if (-not $files.Count) { Write-OperationResult AlreadyConfigured 'Recycle cleanup' 'No other eligible files selected.' }
     elseif (-not (Invoke-RecycleFiles $files)) { $success=$false }
+    if ($Scope -eq 'Deep' -and -not (Invoke-EmptyFolderCleanup)) { $success=$false }
     if (-not $success) { throw 'Some files could not be recycled. No permanent-delete fallback was attempted.' }
+}
+
+function Get-EmptyCleanupFolders {
+    $cutoff=(Get-Date).AddDays(-7)
+    foreach ($root in @((Get-DownloadsFolder),(Join-Path $env:LOCALAPPDATA 'Temp')) | Select-Object -Unique) {
+        if (-not $root -or -not (Test-CleanupPath $root)) { continue }
+        $pending=[Collections.Generic.Stack[string]]::new()
+        $pending.Push($root)
+        while ($pending.Count) {
+            $path=$pending.Pop()
+            if (-not (Test-CleanupPath $path)) { continue }
+            try {
+                $folder=Get-Item -LiteralPath $path -Force -ErrorAction Stop
+                $items=@(Get-ChildItem -LiteralPath $path -Force -ErrorAction Stop)
+                if ($path -ne $root -and -not $items.Count -and $folder.CreationTime -lt $cutoff -and $folder.LastWriteTime -lt $cutoff) {
+                    [pscustomobject]@{Path=$path;Created=$folder.CreationTime;Modified=$folder.LastWriteTime}
+                }
+                foreach ($item in $items) { if ($item.PSIsContainer) { $pending.Push($item.FullName) } }
+            } catch { continue }
+        }
+    }
+}
+
+function Move-EmptyCleanupFolderToRecycleBin($Folder) {
+    $roots=@((Get-DownloadsFolder),(Join-Path $env:LOCALAPPDATA 'Temp'))
+    if (-not @($roots | Where-Object { $_ -and $Folder.Path.StartsWith($_.TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase) }).Count -or
+        -not (Test-CleanupPath $Folder.Path)) { throw 'Folder is outside allowed cleanup locations or no longer safe.' }
+    $current=Get-Item -LiteralPath $Folder.Path -Force -ErrorAction Stop
+    $cutoff=(Get-Date).AddDays(-7)
+    if (-not $current.PSIsContainer -or $current.CreationTime -ne $Folder.Created -or $current.LastWriteTime -ne $Folder.Modified -or
+        $current.CreationTime -ge $cutoff -or $current.LastWriteTime -ge $cutoff -or
+        @(Get-ChildItem -LiteralPath $Folder.Path -Force -ErrorAction Stop).Count) { throw 'Folder changed, is recent, or is not empty; left unchanged.' }
+    Initialize-RecycleApi
+    [OptimizerRecycle]::EmptyFolder($Folder.Path)
+    if (Test-Path -LiteralPath $Folder.Path) { throw 'Empty folder recycling was not confirmed.' }
+}
+
+function Invoke-EmptyFolderCleanup {
+    $success=$true
+    foreach ($folder in Get-EmptyCleanupFolders) {
+        try {
+            Move-EmptyCleanupFolderToRecycleBin $folder
+            Write-OperationResult Applied ('Recycle empty folder '+$folder.Path) 'Empty folder recycled.' $true
+        } catch {
+            $success=$false
+            Write-OperationResult Failed ('Recycle empty folder '+$folder.Path) $_.Exception.Message
+        }
+    }
+    return $success
 }
 
 function Invoke-RecycleFiles($Files) {

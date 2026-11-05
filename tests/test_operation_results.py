@@ -720,6 +720,8 @@ if($script:recycles -ne 1){throw 'Changed file was recycled'}
 $script:inventoryShown=$false
 function Get-CleanupCandidates {param($Scope) [pscustomobject]@{Path='example.zip';Modified=(Get-Date);Bytes=7}}
 function Show-AppInventory { $script:inventoryShown=$true}
+$script:emptyScans=0
+function Invoke-EmptyFolderCleanup {$script:emptyScans++; $true}
 function Get-DuplicateDownloads {}
 function Get-AutomaticCleanupFiles {}
 function Show-StorageSummary {}
@@ -727,6 +729,10 @@ function Out-GridView {param($Title,[switch]$PassThru)}
 function Move-CleanupFileToRecycleBin {throw 'Cancellation must not recycle'}
 Invoke-RecycleCleanup Deep
 if(-not $script:inventoryShown){throw 'App inventory was not shown'}
+if($script:emptyScans -ne 1){throw 'Deep cleanup did not run empty folder cleanup'}
+function Get-CleanupCandidates {}
+Invoke-RecycleCleanup Safe
+if($script:emptyScans -ne 1){throw 'Quick cleanup ran empty folder cleanup'}
 ''')
         self.assertEqual(rows[0]['Status'], 'AlreadyConfigured')
 
@@ -961,6 +967,7 @@ $p=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'old.part'
 $file=[pscustomobject]@{Path=$p;Bytes=7;Modified=(Get-Item $p).LastWriteTime;Processes=@('chrome')}
 function Show-StorageSummary {}
 function Show-AppInventory {}
+function Invoke-EmptyFolderCleanup {$true}
 function Get-DuplicateDownloads {}
 function Get-AutomaticCleanupFiles {$file}
 function Get-CleanupCandidates {}
@@ -990,6 +997,100 @@ foreach($extension in @('.msixbundle','.appx','.appxbundle','.cab','.msp')) {
 }
 if(@(Get-DuplicateDownloads).Count -ne 5){throw 'New package types not deduplicated correctly'}
 ''')
+
+    def test_empty_folder_scan_respects_age_hidden_contents_links_and_roots(self):
+        self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$base=Split-Path $env:OPTIMIZER_RESULTS
+$env:LOCALAPPDATA=Join-Path $base 'local'
+$script:downloads=Join-Path $base 'downloads'
+function Get-DownloadsFolder {$script:downloads}
+$temp=Join-Path $env:LOCALAPPDATA 'Temp'
+$outside=Join-Path $base 'documents'
+foreach($p in @($script:downloads,$temp,$outside,(Join-Path $script:downloads 'old'),(Join-Path $temp 'old'),
+    (Join-Path $script:downloads 'new'),(Join-Path $script:downloads 'copied'),(Join-Path $script:downloads 'hidden'))) {
+    $null=New-Item -ItemType Directory $p -Force
+    (Get-Item $p).CreationTime=(Get-Date).AddDays(-9)
+    (Get-Item $p).LastWriteTime=(Get-Date).AddDays(-9)
+}
+$hidden=Join-Path $script:downloads 'hidden\data'
+[IO.File]::WriteAllText($hidden,'keep')
+(Get-Item $hidden).Attributes=[IO.FileAttributes]::Hidden
+(Get-Item (Join-Path $script:downloads 'new')).LastWriteTime=Get-Date
+(Get-Item (Join-Path $script:downloads 'copied')).CreationTime=Get-Date
+$null=New-Item -ItemType Junction -Path (Join-Path $script:downloads 'linked') -Target $outside
+$folders=@(Get-EmptyCleanupFolders)
+if($folders.Count -ne 2 -or @($folders | Where-Object { (Split-Path $_.Path -Leaf) -ne 'old' }).Count){throw 'Incorrect empty folder selection'}
+if(-not (Test-Path $outside) -or -not (Test-Path $hidden)){throw 'Scan changed files'}
+''')
+
+    def test_empty_folder_rechecks_contents_and_rejects_outside_paths(self):
+        self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$base=Split-Path $env:OPTIMIZER_RESULTS
+$env:LOCALAPPDATA=Join-Path $base 'local'
+$script:downloads=Join-Path $base 'downloads'
+function Get-DownloadsFolder {$script:downloads}
+$path=Join-Path $script:downloads 'old'
+$null=New-Item -ItemType Directory $path -Force
+(Get-Item $path).CreationTime=(Get-Date).AddDays(-9)
+(Get-Item $path).LastWriteTime=(Get-Date).AddDays(-9)
+$folder=@(Get-EmptyCleanupFolders)[0]
+[IO.File]::WriteAllText((Join-Path $path 'new.txt'),'keep')
+(Get-Item $path).LastWriteTime=$folder.Modified
+function Initialize-RecycleApi {throw 'Unsafe folder reached recycling'}
+$caught=$false
+try {Move-EmptyCleanupFolderToRecycleBin $folder} catch {$caught=$_.Exception.Message -like 'Folder changed*'}
+if(-not $caught -or -not (Test-Path (Join-Path $path 'new.txt'))){throw 'New contents were not protected'}
+$folder.Path=$base
+$caught=$false
+try {Move-EmptyCleanupFolderToRecycleBin $folder} catch {$caught=$_.Exception.Message -like 'Folder is outside*'}
+if(-not $caught){throw 'Out-of-scope folder accepted'}
+''')
+
+    def test_empty_folder_summary_does_not_inflate_file_count_or_bytes(self):
+        _, output = self.run_case(r'''
+Write-OperationResult Applied 'Recycle C:\file.zip' 'ok' $true 1MB
+Write-OperationResult Applied 'Recycle empty folder C:\empty' 'ok' $true
+Write-OperationResult Failed 'Recycle empty folder C:\failed' 'denied'
+$null=Show-OperationSummary
+''')
+        self.assertIn('1 file moved to Recycle Bin (1.00 MB)', output)
+        self.assertIn('1 folder recycled', output)
+        self.assertNotIn('2 files moved', output)
+
+    @unittest.skipUnless(os.environ.get('OPTIMIZER_TEST_RECYCLE') == '1', 'Opt-in: recycles and restores a generated empty folder')
+    def test_real_empty_folder_recycling_and_restore(self):
+        rows, _ = self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$base=Split-Path $env:OPTIMIZER_RESULTS
+$env:LOCALAPPDATA=Join-Path $base 'local'
+$script:downloads=Join-Path $base 'downloads'
+function Get-DownloadsFolder {$script:downloads}
+$name='optimizer-empty-'+[guid]::NewGuid().ToString('N')
+$path=Join-Path $script:downloads $name
+$null=New-Item -ItemType Directory $path -Force
+Initialize-RecycleApi
+$occupied=Join-Path $script:downloads 'occupied'
+$null=New-Item -ItemType Directory $occupied
+[IO.File]::WriteAllText((Join-Path $occupied 'keep.txt'),'keep')
+$caught=$false
+try {[OptimizerRecycle]::EmptyFolder($occupied)} catch {$caught=$true}
+if(-not $caught -or [IO.File]::ReadAllText((Join-Path $occupied 'keep.txt')) -ne 'keep'){throw 'Native guard accepted nonempty folder'}
+(Get-Item $path).CreationTime=(Get-Date).AddDays(-9)
+(Get-Item $path).LastWriteTime=(Get-Date).AddDays(-9)
+if(-not (Invoke-EmptyFolderCleanup) -or (Test-Path $path)){throw 'Empty folder was not recycled'}
+$shell=New-Object -ComObject Shell.Application
+try {
+    $entries=@($shell.Namespace(10).Items() | Where-Object Name -eq $name)
+    if($entries.Count -ne 1){throw 'Generated empty folder not found in Recycle Bin'}
+    $entries[0].InvokeVerb('undelete')
+    $timer=[Diagnostics.Stopwatch]::StartNew()
+    while(-not (Test-Path $path) -and $timer.Elapsed.TotalSeconds -lt 5){Start-Sleep -Milliseconds 100}
+    if(-not (Test-Path $path) -or @(Get-ChildItem -LiteralPath $path -Force).Count){throw 'Empty folder did not restore correctly'}
+} finally {[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)}
+''')
+        self.assertEqual([r['Status'] for r in rows], ['Applied'])
 
     def test_storage_measurement_does_not_double_count_nested_categories(self):
         self.run_case(r'''

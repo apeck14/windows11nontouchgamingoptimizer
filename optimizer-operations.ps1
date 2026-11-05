@@ -660,7 +660,8 @@ function Show-OperationSummary {
         Write-Host '  Recovery       Restore the latest MW4 / Warzone backup.' -ForegroundColor DarkGray
     }
     if (@($changed | Where-Object Operation -eq 'System restore point').Count) { Write-Host '  Restore point  Saved and verified. Restore via Recovery.' -ForegroundColor Green }
-    $recycled = @($changed | Where-Object Operation -like 'Recycle *')
+    $emptyFolders = @($changed | Where-Object Operation -like 'Recycle empty folder *')
+    $recycled = @($changed | Where-Object { $_.Operation -like 'Recycle *' -and $_.Operation -notlike 'Recycle empty folder *' })
     if ($recycled.Count) {
         $bytes = ($recycled | Measure-Object Bytes -Sum).Sum
         $size = if ($bytes -ge 1GB) { '{0:N2} GB' -f ($bytes / 1GB) }
@@ -672,8 +673,12 @@ function Show-OperationSummary {
         Write-Host ('  Cleanup        {0} {1} moved to Recycle Bin ({2}).' -f $recycled.Count,$noun,$size) -ForegroundColor Green
         if ($duplicates) { Write-Host ("                 Duplicate downloads: $duplicates") -ForegroundColor DarkGray }
         Write-Host '                 Empty the Recycle Bin to free this space.'
-    } elseif (@($entries | Where-Object Operation -like 'Recycle *').Count) {
+    } elseif (-not $emptyFolders.Count -and @($entries | Where-Object Operation -like 'Recycle *').Count) {
         Write-Host '  Cleanup        No files moved.'
+    }
+    if ($emptyFolders.Count) {
+        $noun = if ($emptyFolders.Count -eq 1) {'folder'} else {'folders'}
+        Write-Host ("  Empty folders  $($emptyFolders.Count) $noun recycled.") -ForegroundColor Green
     }
     if ($restart) { Write-Host '  Restart        Needed to finish applying settings.' -ForegroundColor Yellow }
     if ($failed) {
