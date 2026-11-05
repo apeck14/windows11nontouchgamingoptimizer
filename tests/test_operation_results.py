@@ -296,6 +296,7 @@ function Get-CleanupRoots {param($Scope) [pscustomobject]@{Path=$root;Category='
 $files=@(Get-CleanupCandidates Safe)
 if($files.Count -ne 1 -or (Split-Path $files[0].Path -Leaf) -ne 'old.tmp'){throw 'Incorrect candidate selection'}
 if(Test-CleanupPath $env:SystemRoot){throw 'Windows directory accepted'}
+if(Test-CleanupPath (Join-Path $root 'vanished.tmp')){throw 'Missing file accepted'}
 $env:OneDrive=$root
 if(Test-CleanupPath (Join-Path $root 'old.tmp')){throw 'Cloud directory accepted'}
 ''')
@@ -399,7 +400,7 @@ Show-StorageSummary
 $root=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'downloads'
 $nested=Join-Path $root 'portable'
 $null=New-Item -ItemType Directory $nested -Force
-foreach($name in @('original.zip','copy.zip','different.zip')){[IO.File]::WriteAllText((Join-Path $root $name), $(if($name -eq 'different.zip'){'xyz'}else{'abc'}))}
+foreach($name in @('original.zip','copy.zip','different.zip','different-extension.exe')){[IO.File]::WriteAllText((Join-Path $root $name), $(if($name -eq 'different.zip'){'xyz'}else{'abc'}))}
 (Get-Item (Join-Path $root 'original.zip')).CreationTimeUtc=(Get-Date).AddDays(-1)
 [IO.File]::WriteAllText((Join-Path $nested 'nested.zip'),'abc')
 function Get-DownloadsFolder {$root}

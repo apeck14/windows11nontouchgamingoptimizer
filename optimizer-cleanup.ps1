@@ -155,7 +155,8 @@ function Test-CleanupPath([string]$Path) {
     foreach ($protected in $protectedPaths) {
         if ($protected -and ($full.TrimEnd('\') -ieq $protected.TrimEnd('\') -or $full.StartsWith($protected.TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase))) { return $false }
     }
-    $item = Get-Item -LiteralPath $full -Force -ErrorAction Stop
+    $item = Get-Item -LiteralPath $full -Force -ErrorAction SilentlyContinue
+    if (-not $item) { return $false }
     while ($item) {
         # Reparse points, offline content and cloud recall placeholders are excluded.
         if ([long]$item.Attributes -band (0x400 -bor 0x1000 -bor 0x40000 -bor 0x400000)) { return $false }
@@ -199,7 +200,7 @@ function Get-DuplicateDownloads {
     $files = @(Get-ChildItem -LiteralPath $downloads -File -ErrorAction Stop | Where-Object {
         $_.Length -gt 0 -and $_.Extension -in @('.exe','.msi','.msix','.zip','.7z','.rar','.iso') -and (Test-CleanupPath $_.FullName)
     })
-    foreach ($size in @($files | Group-Object Length | Where-Object Count -gt 1)) {
+    foreach ($size in @($files | Group-Object Length,Extension | Where-Object Count -gt 1)) {
         $hashed = @(foreach ($file in $size.Group) {
             try {
                 [pscustomobject]@{File=$file;Hash=(Get-CleanupHash $file.FullName)}
