@@ -271,6 +271,17 @@ function Invoke-PerformancePlan {
     }
 }
 
+function Wait-OptimizerRestorePoint($Description, $Before) {
+    # Windows may expose the point after CreateRestorePoint has returned success.
+    for ($attempt=0; $attempt -lt 60; $attempt++) {
+        $point = @(Get-CimInstance -Namespace root/default -ClassName SystemRestore -ErrorAction Stop |
+            Where-Object { $_.Description -eq $Description -and $_.SequenceNumber -notin $Before })
+        if ($point.Count -eq 1) { return $point[0] }
+        if ($attempt -lt 59) { Start-Sleep -Seconds 2 }
+    }
+    throw 'Windows did not expose a new matching restore point within two minutes. No checkpoint has been verified.'
+}
+
 function New-OptimizerRestorePoint {
     $policy = 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\SystemRestore'
     foreach ($name in @('DisableSR','DisableConfig')) {
@@ -295,9 +306,7 @@ function New-OptimizerRestorePoint {
             Description=$description; RestorePointType=[uint32]12; EventType=[uint32]100
         } -ErrorAction Stop
         if ($result.ReturnValue -ne 0) { throw "Windows restore-point creation returned $($result.ReturnValue). Check System Protection and available disk space." }
-        $point = @(Get-CimInstance -Namespace root/default -ClassName SystemRestore -ErrorAction Stop |
-            Where-Object { $_.Description -eq $description -and $_.SequenceNumber -notin $before })
-        if ($point.Count -ne 1) { throw 'Windows did not expose a new matching restore point. No checkpoint has been verified.' }
+        $point = @(Wait-OptimizerRestorePoint $description $before)
     } finally {
         if ($frequencyChanged -and $frequency.Exists) {
             New-ItemProperty -LiteralPath $key -Name $name -PropertyType DWord -Value $frequency.Value -Force -ErrorAction Stop | Out-Null

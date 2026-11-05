@@ -269,6 +269,7 @@ $null=Invoke-Operation 'Pagefile Auto'
         for original, outcome in [('absent','ok'), ('existing','ok'), ('existing','error'), ('existing','returnerror'), ('absent','missing')]:
             with self.subTest(original=original, outcome=outcome):
                 rows, _ = self.run_case(r'''
+function Start-Sleep {param($Seconds)}
 $script:original='ORIGINAL'; $script:outcome='OUTCOME'; $script:description=''; $script:writes=@(); $script:removed=$false
 function Get-RegistryState {param($Path,$Name)
     if($Name -eq 'SystemRestorePointCreationFrequency' -and $script:original -eq 'existing'){@{Exists=$true;Type='DWord';Value=1440}}else{@{Exists=$false}}
@@ -297,6 +298,22 @@ if($script:original -eq 'existing'){
                 if outcome == 'ok':
                     self.assertTrue(rows[0]['Verified'])
                     self.assertIn('#2:', rows[0]['Detail'])
+
+    def test_restore_wait_handles_delayed_visibility_and_has_a_bound(self):
+        self.run_case(r'''
+$script:queries=0; $script:sleeps=0; $script:visible=$true
+function Start-Sleep {param($Seconds) if($Seconds -ne 2){throw 'Wrong polling interval'}; $script:sleeps++}
+function Get-CimInstance {param($Namespace,$ClassName,$ErrorAction)
+    $script:queries++
+    [pscustomobject]@{SequenceNumber=1;Description='Old'}
+    if($script:visible -and $script:queries -ge 3){[pscustomobject]@{SequenceNumber=2;Description='New'}}
+}
+$point=Wait-OptimizerRestorePoint 'New' @(1)
+if($point.SequenceNumber -ne 2 -or $script:queries -ne 3 -or $script:sleeps -ne 2){throw 'Did not wait for new point'}
+$script:visible=$false; $script:queries=0; $script:sleeps=0; $failed=$false
+try {Wait-OptimizerRestorePoint 'New' @(1)} catch {$failed=$true}
+if(-not $failed -or $script:queries -ne 60 -or $script:sleeps -ne 59){throw 'Polling was not bounded'}
+''')
 
     def test_restore_frequency_write_failure_keeps_original_error(self):
         rows, _ = self.run_case(r'''
