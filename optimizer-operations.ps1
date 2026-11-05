@@ -230,6 +230,8 @@ public static class OptimizerPower {
     static extern uint PowerGetUserConfiguredACPowerMode(out Guid mode);
     [DllImport("powrprof.dll")]
     static extern uint PowerSetUserConfiguredACPowerMode(ref Guid mode);
+    [DllImport("powrprof.dll")]
+    static extern uint PowerReadACValueIndex(IntPtr root, ref Guid scheme, ref Guid group, ref Guid setting, out uint value);
     public static Capabilities ReadCapabilities() {
         Capabilities value;
         if (!GetPwrCapabilities(out value)) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -244,6 +246,11 @@ public static class OptimizerPower {
         uint code=PowerSetUserConfiguredACPowerMode(ref value);
         if(code!=0) throw new Win32Exception((int)code);
     }
+    public static uint ReadACValue(Guid scheme, Guid group, Guid setting) {
+        uint value; uint code=PowerReadACValueIndex(IntPtr.Zero,ref scheme,ref group,ref setting,out value);
+        if(code!=0) throw new Win32Exception((int)code);
+        return value;
+    }
 }
 '@
 }
@@ -256,6 +263,7 @@ function Get-PowerCapabilities {
 
 function Get-ACPowerMode { Initialize-PowerApi; [OptimizerPower]::ReadACMode() }
 function Set-ACPowerMode([guid]$Mode) { Initialize-PowerApi; [OptimizerPower]::SetACMode($Mode) }
+function Get-ACPowerValue([guid]$Scheme,[guid]$Group,[guid]$Setting) { Initialize-PowerApi; [OptimizerPower]::ReadACValue($Scheme,$Group,$Setting) }
 
 function Invoke-PerformancePlan {
     $caps = Get-PowerCapabilities
@@ -485,11 +493,7 @@ function Get-NativeDesiredState {
         $group = $Tokens[3]; $setting = $Tokens[4]
         if ($aliases.ContainsKey($group)) { $group=$aliases[$group] }
         if ($aliases.ContainsKey($setting)) { $setting=$aliases[$setting] }
-        $key = "HKLM:\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes\$scheme\$group\$setting"
-        if (-not (Test-Path -LiteralPath $key)) { return $false }
-        $state = Get-ItemProperty -LiteralPath $key -ErrorAction Stop
-        if (-not $state.PSObject.Properties['ACSettingIndex']) { return $false }
-        return $state.ACSettingIndex -eq [uint32]$Tokens[5]
+        return (Get-ACPowerValue $scheme $group $setting) -eq [uint32]$Tokens[5]
     }
     if ($exe -eq 'fsutil' -and $Tokens[1] -eq 'behavior' -and $Tokens[2] -eq 'set') {
         $query = Invoke-NativeOperation fsutil @('behavior','query',$Tokens[3])

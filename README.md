@@ -4,7 +4,7 @@ Windows configuration and recycle-only cleanup. Originally by [Matt Hurley](http
 
 ## Run
 
-Extract all three `.bat`/`.ps1` files together and run `win11_nontouch_gaming_optimiser.bat` as administrator. The menu describes individual actions.
+Extract all three `.bat`/`.ps1` files together and run `win11_nontouch_gaming_optimiser.bat` as administrator. The menu describes individual actions. Close running optimizer windows before editing or updating its files.
 
 - Full optimization defaults to **memory integrity (HVCI) off**, reducing security and potentially affecting anti-cheat compatibility. **M** re-enables it. Game DVR recording defaults off; answer No to preserve capture settings. Installed apps remain installed. Performance gains are not guaranteed.
 - Full optimization attempts to enable System Protection and verify a new restore point. Failure defaults to cancelling. **3** creates a checkpoint; **R** opens System Restore. Individual tweaks do not create checkpoints automatically. Restore points can expire; **Undo** is partial, not a substitute for a backup.
