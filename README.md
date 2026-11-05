@@ -27,7 +27,7 @@ Extract the complete ZIP and run `win11_nontouch_gaming_optimiser.bat` as admini
 
 - **1 Full optimization:** Windows tweaks plus Quick cleanup. Defaults to memory integrity (HVCI) off and Game DVR recording off; recording has an opt-out prompt. HVCI off reduces security and may affect anti-cheat compatibility.
 - **2 Quick cleanup:** recycle temp files, supported app logs and crash reports older than 30 days.
-- **3 Deep cleanup:** everything in Quick, plus old web caches, partial downloads, duplicate installer/archive downloads (one retained), and recognized driver extractions (newest retained). Shows storage estimates and possible leftover game/app folders, checked against Windows, Steam and Epic installation records. Leftover saves/settings remain for manual inspection; other downloads/recordings require selection via `Out-GridView`.
+- **3 Deep cleanup:** everything in Quick, plus old web caches, partial downloads, duplicate installer/archive downloads (one retained), and recognized driver extractions (newest retained). Shows storage estimates; other downloads/recordings require selection via `Out-GridView`.
 - **4 MW4 / Warzone:** compatible existing config keys and NVIDIA application profiles. Shared configs may affect other Call of Duty titles. Tearing and higher GPU power use are possible.
 
 Age-based automatic cleanup checks creation and modification dates; app-specific cleanup skips running apps. Cleanup can discard download resume progress and diagnostic history; web caches may need downloading again. Files occupy space in the Recycle Bin until emptied; Storage Sense can empty it independently.

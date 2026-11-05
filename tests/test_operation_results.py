@@ -720,7 +720,6 @@ if($script:recycles -ne 1){throw 'Changed file was recycled'}
 $script:inventoryShown=$false
 function Get-CleanupCandidates {param($Scope) [pscustomobject]@{Path='example.zip';Modified=(Get-Date);Bytes=7}}
 function Show-AppInventory { $script:inventoryShown=$true}
-function Show-PossibleLeftoverFolders {}
 function Get-DuplicateDownloads {}
 function Get-AutomaticCleanupFiles {}
 function Show-StorageSummary {}
@@ -962,7 +961,6 @@ $p=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'old.part'
 $file=[pscustomobject]@{Path=$p;Bytes=7;Modified=(Get-Item $p).LastWriteTime;Processes=@('chrome')}
 function Show-StorageSummary {}
 function Show-AppInventory {}
-function Show-PossibleLeftoverFolders {}
 function Get-DuplicateDownloads {}
 function Get-AutomaticCleanupFiles {$file}
 function Get-CleanupCandidates {}
@@ -1140,107 +1138,6 @@ if(Test-CleanupPath $queue){throw 'Pending queue must remain protected'}
 $roots=@(Get-AutomaticCleanupRoots | Where-Object Category -eq 'Archived crash report')
 if(-not ($roots.Path -contains $archive) -or @($roots | Where-Object Days -ne 30).Count){throw 'Incorrect archive rules'}
 ''')
-
-    def test_installed_names_include_steam_secondary_libraries_and_epic(self):
-        self.run_case(r'''
-. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
-$base=Split-Path $env:OPTIMIZER_RESULTS
-$script:steamRoot=Join-Path $base 'steam'
-$secondary=Join-Path $base 'secondary'
-$env:ProgramData=Join-Path $base 'programdata'
-$epic=Join-Path $env:ProgramData 'Epic\EpicGamesLauncher\Data\Manifests'
-foreach($p in @((Join-Path $script:steamRoot 'steamapps'),(Join-Path $secondary 'steamapps'),$epic)) {
-    $null=New-Item -ItemType Directory $p -Force
-}
-[IO.File]::WriteAllText((Join-Path $script:steamRoot 'steamapps\libraryfolders.vdf'),('"path" "'+$secondary.Replace('\','\\')+'"'))
-[IO.File]::WriteAllText((Join-Path $secondary 'steamapps\appmanifest_252950.acf'),'"AppState" { "name" "Rocket League" }')
-[IO.File]::WriteAllText((Join-Path $epic 'fortnite.item'),'{"DisplayName":"Fortnite"}')
-[IO.File]::WriteAllText((Join-Path $epic 'invalid.item'),'invalid JSON')
-function Get-AppInventory {[pscustomobject]@{App='Call of Duty: Vanguard';Path='ignored'}}
-function Get-ItemPropertyValue {$script:steamRoot}
-$names=@(Get-CleanupInstalledNames)
-foreach($name in @('Call of Duty: Vanguard','Rocket League','Fortnite')) {
-    if($name -notin $names){throw "Missing installation record: $name"}
-}
-if($names.Count -ne 3){throw 'Malformed record was accepted'}
-''')
-
-    def test_leftover_report_excludes_installed_and_running_games_without_changes(self):
-        _, output = self.run_case(r'''
-. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
-$base=Split-Path $env:OPTIMIZER_RESULTS
-foreach($name in @('Vanguard','Fortnite','Rocket')) {
-    $p=Join-Path $base $name
-    $null=New-Item -ItemType Directory $p
-    [IO.File]::WriteAllText((Join-Path $p 'save.dat'),'keep me')
-}
-function Get-KnownGameFolders {
-    [pscustomobject]@{Game='Call of Duty Vanguard';Path=(Join-Path $base 'Vanguard');Processes=@('Vanguard')}
-    [pscustomobject]@{Game='Fortnite';Path=(Join-Path $base 'Fortnite');Processes=@('Fortnite')}
-    [pscustomobject]@{Game='Rocket League';Path=(Join-Path $base 'Rocket');Processes=@('RocketLeague')}
-}
-function Get-CleanupInstalledNames {'Call of Duty: Vanguard'}
-function Get-Process {[pscustomobject]@{ProcessName='RocketLeague';Path=''}}
-Show-PossibleLeftoverFolders
-foreach($name in @('Vanguard','Fortnite','Rocket')) {
-    if([IO.File]::ReadAllText((Join-Path $base "$name\save.dat")) -ne 'keep me'){throw 'Report changed saved data'}
-}
-''')
-        self.assertIn('Fortnite', output)
-        self.assertIn('Remaining GB', output)
-        self.assertNotIn('Vanguard', output)
-        self.assertNotIn('Rocket League', output)
-        self.assertIn('may contain saves', output)
-
-    def test_game_diagnostics_recycle_before_remaining_size_is_measured(self):
-        rows, output = self.run_case(r'''
-. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
-$base=Split-Path $env:OPTIMIZER_RESULTS
-$env:LOCALAPPDATA=Join-Path $base 'local'
-$env:APPDATA=Join-Path $base 'roaming'
-$env:ProgramData=Join-Path $base 'programdata'
-$script:gamePath=Join-Path $env:LOCALAPPDATA 'FortniteGame'
-$logs=Join-Path $script:gamePath 'Saved\Logs'
-$null=New-Item -ItemType Directory $logs -Force
-[IO.File]::WriteAllText((Join-Path $logs 'old.log'),'old log')
-[IO.File]::WriteAllText((Join-Path $logs 'recent.log'),'recent log')
-[IO.File]::WriteAllText((Join-Path $script:gamePath 'save.dat'),'saved progress')
-[IO.File]::WriteAllText((Join-Path $logs 'preferences.json'),'saved settings')
-foreach($p in Get-ChildItem $script:gamePath -File -Recurse) {
-    $p.CreationTime=(Get-Date).AddDays(-40)
-    $p.LastWriteTime=(Get-Date).AddDays(-40)
-}
-(Get-Item (Join-Path $logs 'recent.log')).LastWriteTime=Get-Date
-$script:knownFolders=@(Get-KnownGameFolders | Where-Object Path -eq $script:gamePath)
-if($script:knownFolders.Count -ne 1){throw 'Built-in Fortnite folder detection failed'}
-function Get-KnownGameFolders {
-    $script:knownFolders
-}
-function Get-CleanupInstalledNames {}
-function Get-Process {}
-function Get-DownloadsFolder {''}
-function Get-OldDriverExtractionFiles {}
-function Get-DuplicateDownloads {}
-function Get-CleanupCandidates {}
-function Show-StorageSummary {}
-function Show-AppInventory {}
-function Move-CleanupFileToRecycleBin {param($Path) [IO.File]::Delete($Path)}
-function Out-GridView {throw 'Unexpected selection dialog'}
-$realMeasure=${function:Measure-StorageRoots}
-function Measure-StorageRoots {param($Roots)
-    if(Test-Path (Join-Path $script:gamePath 'Saved\Logs\old.log')){throw 'Measured before automatic cleanup'}
-    $usage=@(& $realMeasure $Roots)
-    if(($usage | Measure-Object Bytes -Sum).Sum -ne 38){throw 'Remaining size does not match surviving files'}
-    $usage
-}
-Invoke-RecycleCleanup Deep
-if(Test-Path (Join-Path $logs 'old.log')){throw 'Old diagnostic was not recycled'}
-if([IO.File]::ReadAllText((Join-Path $script:gamePath 'save.dat')) -ne 'saved progress'){throw 'Save was changed'}
-if(-not (Test-Path (Join-Path $logs 'preferences.json')) -or -not (Test-Path (Join-Path $logs 'recent.log'))){throw 'Unrelated or recent file changed'}
-''')
-        self.assertEqual(sum(r['Status'] == 'Applied' for r in rows), 1)
-        self.assertIn('POSSIBLE LEFTOVER', output)
-        self.assertIn('Remaining GB', output)
 
     def test_largest_app_folders_match_installed_names_and_show_gb(self):
         _, output = self.run_case(r'''
