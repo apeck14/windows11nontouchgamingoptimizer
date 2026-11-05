@@ -633,8 +633,16 @@ function Show-OperationSummary {
     $entries = @(Get-Content -LiteralPath $env:OPTIMIZER_RESULTS | ForEach-Object { $_ | ConvertFrom-Json -ErrorAction Stop })
     if ($env:OPTIMIZER_ACTION_ID) { $entries = @($entries | Where-Object Action -eq $env:OPTIMIZER_ACTION_ID) }
     if (-not $entries.Count) { Write-Host 'No operations recorded in this session.'; return 0 }
-    $scope = if ($env:OPTIMIZER_ACTION_ID) {'this action'} else {'this session'}
-    Write-Host "`nSUMMARY - $scope" -ForegroundColor Cyan
+    $failed = @($entries | Where-Object Status -eq 'Failed').Count
+    $unverified = @($entries | Where-Object Status -eq 'Unverified').Count
+    $restart = @($entries | Where-Object Status -eq 'RestartRequired').Count
+    $skipped = @($entries | Where-Object Status -eq 'Unsupported').Count
+    $code = if ($failed) {1} elseif ($unverified -or $restart) {2} else {0}
+    $heading = @('COMPLETE','FINISHED WITH ISSUES','FINISHED - REVIEW NEEDED')[$code]
+    $color = @('Green','Red','Yellow')[$code]
+    $scope = if ($env:OPTIMIZER_ACTION_ID) {'RUN'} else {'SESSION'}
+    Write-Host "`n  $scope SUMMARY - $heading" -ForegroundColor $color
+    Write-Host '  ----------------------------------------' -ForegroundColor DarkGray
     $changed = @($entries | Where-Object { $_.Verified -and $_.Status -in @('Applied','RestartRequired') })
     $areas = @($changed | Where-Object { $_.Operation -notlike 'Recycle *' -and $_.Operation -notlike 'reg export *' -and $_.Operation -ne 'System restore point' } | ForEach-Object {
         switch -Regex ($_.Operation) {
@@ -643,34 +651,37 @@ function Show-OperationSummary {
             '^Memory|Memory Management|^Page file|DeviceGuard' {'Memory & security'; break}
             '^powercfg|power plan|^AC power' {'Power settings'; break}
             'Tcpip|^netsh|DeliveryOptimization' {'Networking'; break}
+            'FileSystem|PrefetchParameters' {'Storage settings'; break}
             'Visual|Desktop|WindowMetrics|DWM|Explorer' {'Desktop & visuals'; break}
             default {'Other Windows settings'}
         }
     } | Sort-Object -Unique)
-    if ($areas.Count) { Write-Host ('Updated: '+($areas -join '; ')) -ForegroundColor Green }
-    else { Write-Host 'No new configuration changes confirmed.' }
-    if (@($changed | Where-Object Operation -eq 'System restore point').Count) { Write-Host 'Restore point: created and verified. Use Recovery to restore.' -ForegroundColor Green }
+    if ($areas.Count) {
+        Write-Host '  Updated:'
+        foreach ($area in $areas) { Write-Host ("    - $area") -ForegroundColor Green }
+    } else { Write-Host '  No new setting changes confirmed.' }
+    Write-Host ''
+    if (@($changed | Where-Object Operation -eq 'System restore point').Count) { Write-Host '  Restore point  Saved and verified. Restore via Recovery.' -ForegroundColor Green }
     $recycled = @($changed | Where-Object Operation -like 'Recycle *')
     if ($recycled.Count) {
         $gb = ($recycled | Measure-Object Bytes -Sum).Sum / 1GB
         $duplicates = @($recycled | Where-Object Duplicate -eq $true).Count
         $noun = if ($recycled.Count -eq 1) {'file'} else {'files'}
-        Write-Host ('Recycled: {0} {1} | ~{2:N2} GB | Duplicates: {3}' -f $recycled.Count,$noun,$gb,$duplicates) -ForegroundColor Green
-        Write-Host 'Space is still occupied in the Recycle Bin; empty it manually to free space.'
+        Write-Host ('  Cleanup        {0} {1} moved to Recycle Bin ({2:N2} GB).' -f $recycled.Count,$noun,$gb) -ForegroundColor Green
+        if ($duplicates) { Write-Host ("                 Duplicate downloads: $duplicates") -ForegroundColor DarkGray }
+        Write-Host '                 Empty the Recycle Bin to free this space.'
     } elseif (@($entries | Where-Object Operation -like 'Recycle *').Count) {
-        Write-Host 'Recycled: no files.'
+        Write-Host '  Cleanup        No files moved.'
     }
-    if (@($entries | Where-Object Status -eq 'RestartRequired').Count) { Write-Host 'Restart: needed to finish applying some settings.' -ForegroundColor Yellow }
-    $failed = @($entries | Where-Object Status -eq 'Failed').Count
-    $unverified = @($entries | Where-Object Status -eq 'Unverified').Count
-    $skipped = @($entries | Where-Object Status -eq 'Unsupported').Count
-    if ($failed -or $unverified) { Write-Host ("Review: $failed failed; $unverified unverified.") -ForegroundColor $(if ($failed) {'Red'} else {'Yellow'}) }
-    if ($skipped) { Write-Host ("Skipped: $skipped unavailable items (not errors).") -ForegroundColor DarkGray }
-    Write-Host ('Details: '+$env:LOG_FILE)
-    if ($failed) { Write-Host 'PARTIAL RESULT - see the log for failures.' -ForegroundColor Red; return 1 }
-    if ($unverified -or @($entries | Where-Object Status -eq 'RestartRequired').Count) { Write-Host 'INCOMPLETE VERIFICATION - restart/review as noted above.' -ForegroundColor Yellow; return 2 }
-    Write-Host 'Completed.' -ForegroundColor Green
-    return 0
+    if ($restart) { Write-Host '  Restart        Needed to finish applying settings.' -ForegroundColor Yellow }
+    if ($failed) {
+        $noun = if ($failed -eq 1) {'change'} else {'changes'}
+        Write-Host ("  Not applied    $failed $noun. See the log.") -ForegroundColor Red
+    }
+    if ($unverified) { Write-Host ("  Manual checks  $unverified to review in the log.") -ForegroundColor Yellow }
+    if ($skipped) { Write-Host ("  Skipped        $skipped unavailable tweaks (not errors).") -ForegroundColor DarkGray }
+    Write-Host ("`n  Log: logs\"+[IO.Path]::GetFileName($env:LOG_FILE)) -ForegroundColor DarkGray
+    return $code
 }
 
 function Invoke-Operation {

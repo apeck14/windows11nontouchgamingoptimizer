@@ -308,7 +308,7 @@ Write-OperationResult Unverified 'Third' 'unknown'
 $code=Show-OperationSummary
 if($code -ne 1){throw 'Summary missed failed operation'}
 ''')
-        self.assertIn('PARTIAL RESULT', stdout)
+        self.assertIn('FINISHED WITH ISSUES', stdout)
         self.assertNotIn('All supported, attempted operations have verified', stdout)
         self.assertEqual(len(rows), 3)
 
@@ -317,7 +317,7 @@ if($code -ne 1){throw 'Summary missed failed operation'}
 Write-OperationResult Unverified 'Command' 'unknown'
 if((Show-OperationSummary) -ne 2){throw 'Unverified was counted as success'}
 ''')
-        self.assertIn('INCOMPLETE VERIFICATION', stdout)
+        self.assertIn('FINISHED - REVIEW NEEDED', stdout)
 
     def test_summary_counts_only_confirmed_recycling_and_stays_brief(self):
         _, output = self.run_case(r'''
@@ -330,13 +330,16 @@ Write-Host 'SUMMARY_START'
 if((Show-OperationSummary) -ne 1){throw 'Failed operation was not reflected in exit code'}
 ''')
         summary = output.split('SUMMARY_START', 1)[1]
-        self.assertIn('2 files | ~5.00 GB | Duplicates: 1', summary)
+        self.assertIn('2 files moved to Recycle Bin (5.00 GB)', summary)
         self.assertIn('Gaming, graphics & input', summary)
-        self.assertIn('Restart: needed', summary)
-        self.assertIn('1 failed', summary)
+        self.assertIn('Restart        Needed', summary)
+        self.assertIn('Not applied    1 change.', summary)
         self.assertNotIn('DO_NOT_REPEAT_RAW_ERROR', summary)
         self.assertNotIn('C:\\first.zip', summary)
-        self.assertLess(len(summary.splitlines()), 15)
+        self.assertLess(len(summary.splitlines()), 18)
+        self.assertIn('Duplicate downloads: 1', summary)
+        self.assertIn('Log: logs\\log.txt', summary)
+        self.assertIn('    - Gaming, graphics & input', summary)
 
     def test_summary_separates_actions_but_keeps_session_report(self):
         _, output = self.run_case(r'''
@@ -352,9 +355,9 @@ $null=Show-OperationSummary
 ''')
         current, session = output.split('CURRENT_START', 1)[1].split('SESSION_START', 1)
         self.assertNotIn('Memory & security', current)
-        self.assertIn('1 file | ~1.00 GB', current)
+        self.assertIn('1 file moved to Recycle Bin (1.00 GB)', current)
         self.assertIn('Memory & security', session)
-        self.assertIn('1 file | ~1.00 GB', session)
+        self.assertIn('1 file moved to Recycle Bin (1.00 GB)', session)
 
     def test_console_hides_routine_details_and_colors_real_outcomes(self):
         self.run_case(r'''
