@@ -72,8 +72,8 @@ cls
 call :Banner
 call :Log "Awaiting menu selection"
 echo    %CLR_MENU%[1]%CLR_RESET% Full optimization - Windows gaming tweaks
-echo    %CLR_MENU%[2]%CLR_RESET% Quick cleanup - recycle old temporary files
-echo    %CLR_MENU%[3]%CLR_RESET% Deep cleanup - storage review and file cleanup
+echo    %CLR_MENU%[2]%CLR_RESET% Quick cleanup - old temp files, logs and crash reports
+echo    %CLR_MENU%[3]%CLR_RESET% Deep cleanup - Quick plus downloads, caches and storage review
 echo    %CLR_MENU%[4]%CLR_RESET% MW4 / Warzone - competitive game settings
 echo    %CLR_MENU%[R]%CLR_RESET% Recovery - restore points, undo, memory integrity
 echo    %CLR_MENU%[P]%CLR_RESET% Results from this session
@@ -134,7 +134,7 @@ echo [*] Step 5/13: Optimizing visual effects...
 call :DisableAnimations
 echo [*] Step 6/13: Optimizing startup...
 call :OptimizeStartup
-echo [*] Step 7/13: Recycling old temporary files...
+echo [*] Step 7/13: Recycling old temp files, logs and crash reports...
 call :FreeDiskSpace
 echo [*] Step 8/13: GPU and storage optimizations...
 call :AdvancedGPUStorage
@@ -414,7 +414,7 @@ call :Log "Startup changes attempted; see results"
 exit /b 0
 
 :FreeDiskSpace
-call :Log "Recycling old user temporary files"
+call :Log "Recycling old user temp files, logs and crash reports"
 call :RunOperation Cleanup Safe
 exit /b %errorlevel%
 
@@ -511,7 +511,7 @@ exit /b 0
 
 :ShowHelp
 echo Full optimization includes gaming, network, visual, startup, and quick cleanup changes.
-echo Quick cleanup recycles old temporary files. Deep cleanup reviews storage and more files.
+echo Quick recycles old temp files, logs and crash reports. Deep includes Quick plus storage review and more cleanup.
 echo MW4 / Warzone is a separate preset. Close the game first; undo it through Recovery.
 echo Full attempts a restore point first. Recovery contains restore and partial undo options.
 echo Full disables memory integrity; re-enable it in Recovery if needed.

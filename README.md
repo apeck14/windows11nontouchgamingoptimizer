@@ -23,7 +23,7 @@ System/driver changes are mocked; files use disposable fixtures. Set `$env:OPTIM
 
 ## Use
 
-Extract the complete ZIP and run `win11_nontouch_gaming_optimiser.bat` as administrator under the desktop user's account. Keep companion `.ps1` and `.cs` files together.
+[Download the ZIP](https://github.com/apeck14/windows11nontouchgamingoptimizer/archive/refs/heads/main.zip), extract it, and run `win11_nontouch_gaming_optimiser.bat` as administrator under the desktop user's account. Keep companion `.ps1` and `.cs` files together.
 
 - **1 Full optimization:** Windows tweaks plus Quick cleanup. Defaults to memory integrity (HVCI) off and Game DVR recording off; recording has an opt-out prompt. HVCI off reduces security and may affect anti-cheat compatibility.
 - **2 Quick cleanup:** recycle temp files, supported app logs and crash reports older than 30 days.
