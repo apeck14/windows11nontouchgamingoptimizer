@@ -348,6 +348,37 @@ if(($usage | Where-Object Category -eq Documents).Bytes -ne 10){throw 'Nested pi
 if(($usage | Where-Object Category -eq Pictures).Bytes -ne 20){throw 'Picture size incorrect'}
 ''')
 
+    def test_storage_marks_missing_and_linked_ancestors_partial(self):
+        self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$base=Split-Path $env:OPTIMIZER_RESULTS
+$target=Join-Path $base 'target'
+$child=Join-Path $target 'child'
+$null=New-Item -ItemType Directory $child -Force
+[IO.File]::WriteAllBytes((Join-Path $child 'file.bin'),[byte[]]::new(20))
+$link=Join-Path $base 'linked'
+$null=New-Item -ItemType Junction -Path $link -Target $target
+$rows=@(Measure-StorageRoots @(
+    [pscustomobject]@{Category='Linked';Path=(Join-Path $link 'child')},
+    [pscustomobject]@{Category='Missing';Path=(Join-Path $base 'missing')}
+))
+if($rows.Count -ne 2 -or @($rows | Where-Object {-not $_.Partial -or $_.Bytes -ne 0}).Count){throw 'Unavailable data claimed as scanned'}
+''')
+
+    def test_app_inventory_uses_gb_and_keeps_unknown_sizes_blank(self):
+        _, output = self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+function Get-ItemProperty {param($Path,$ErrorAction)
+    [pscustomobject]@{DisplayName='KnownApp';EstimatedSize=1572864;Publisher='Test'}
+    [pscustomobject]@{DisplayName='UnknownApp';Publisher='Test'}
+}
+function Get-AppxPackage {param($ErrorAction)}
+Show-AppInventory
+''')
+        self.assertIn('EstimatedGB', output)
+        self.assertRegex(output, r'KnownApp\s+Test\s+1[.,]5')
+        self.assertRegex(output, r'UnknownApp\s+Test\s*\n')
+
     def test_storage_summary_shows_gb_categories_and_investigation_paths(self):
         _, output = self.run_case(r'''
 . (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')

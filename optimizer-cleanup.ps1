@@ -83,7 +83,14 @@ function Measure-StorageRoots($Roots) {
         Write-Host ("Measuring {0}: {1}" -f $root.Category,$root.Path)
         [long]$bytes = 0; $partial = $false
         $pending = [Collections.Generic.Stack[string]]::new()
-        if (Test-Path -LiteralPath $root.Path -PathType Container) { $pending.Push($root.Path) }
+        try {
+            $directory = Get-Item -LiteralPath $root.Path -Force -ErrorAction Stop
+            if (-not $directory.PSIsContainer -or ([IO.DriveInfo]::new([IO.Path]::GetPathRoot($root.Path))).DriveType -ne 'Fixed') { throw 'Not a local folder.' }
+            for ($ancestor=$directory; $ancestor; $ancestor=$ancestor.Parent) {
+                if ([long]$ancestor.Attributes -band (0x400 -bor 0x1000 -bor 0x40000 -bor 0x400000)) { throw 'Linked or cloud path.' }
+            }
+            $pending.Push($root.Path)
+        } catch { $partial=$true }
         while ($pending.Count) {
             $path = $pending.Pop()
             try {
@@ -174,8 +181,8 @@ function Show-AppInventory {
         'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
         'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')
     $apps = @(Get-ItemProperty $paths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -and -not $_.SystemComponent } |
-        Select-Object @{n='App';e={$_.DisplayName}},Publisher,@{n='EstimatedMB';e={[math]::Round($_.EstimatedSize/1024,1)}})
-    $apps += @(Get-AppxPackage -ErrorAction Stop | Select-Object @{n='App';e={$_.Name}},Publisher,@{n='EstimatedMB';e={$null}})
+        Select-Object @{n='App';e={$_.DisplayName}},Publisher,@{n='EstimatedGB';e={if ($null -ne $_.EstimatedSize) {[math]::Round($_.EstimatedSize/1MB,2)}}})
+    $apps += @(Get-AppxPackage -ErrorAction Stop | Select-Object @{n='App';e={$_.Name}},Publisher,@{n='EstimatedGB';e={$null}})
     Write-Host 'Installed apps are listed for review only; installed applications cannot be recycled safely.'
     $apps | Sort-Object App -Unique | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
 }
