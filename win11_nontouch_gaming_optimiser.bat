@@ -275,7 +275,8 @@ echo   %CLR_TITLE%APPLYING SAFE NETWORK OPTIMIZATIONS%CLR_RESET%
 echo ========================================================================
 echo.
 echo [*] Applying low-risk tweaks for gaming (keeps Windows TCP defaults)...
-REM Keep global netsh defaults to reduce compatibility issues; apply only latency-friendly knobs.
+REM Restore normal receive-window growth, including after older Full runs.
+call :RunOperation Native netsh interface tcp set global autotuninglevel=normal
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpNoDelay /t REG_DWORD /d 1 /f
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpAckFrequency /t REG_DWORD /d 1 /f
 
@@ -397,8 +398,8 @@ echo %CLR_TITLE%  ^|                 GAMING PERFORMANCE TWEAKS                  
 echo %CLR_TITLE%  ======================================================================%CLR_RESET%
 echo.
 if not defined DVR_PREF_SET (
-    echo [*] Game Bar capture: keep it on, or disable for a small FPS gain?
-    choice /c YN /n /d N /t 5 /m "Disable Game DVR background capture? (Y/N, default=N): "
+    echo [*] Disable Game DVR recording for gaming performance; Game Bar stays installed.
+    choice /c YN /n /d Y /t 5 /m "Disable Game DVR recording? (Y/N, default=Y): "
     if "!errorlevel!"=="1" (
         set "DISABLE_DVR=1"
     ) else (
@@ -422,25 +423,14 @@ call :RunOperation Registry reg add "HKCU\Software\Microsoft\GameBar" /v AllowAu
 call :RunOperation Registry reg add "HKCU\Software\Microsoft\GameBar" /v AutoGameModeEnabled /t REG_DWORD /d 1 /f
 if "%DISABLE_DVR%"=="1" (
     call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\GameDVR" /v AllowGameDVR /t REG_DWORD /d 0 /f
-    call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\PolicyManager\default\ApplicationManagement\AllowGameDVR" /v value /t REG_DWORD /d 0 /f
     call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v AppCaptureEnabled /t REG_DWORD /d 0 /f
-    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v GameDVR_Enabled /t REG_DWORD /d 0 /f
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v HistoricalCaptureEnabled /t REG_DWORD /d 0 /f
     call :RunOperation Registry reg add "HKCU\System\GameConfigStore" /v GameDVR_Enabled /t REG_DWORD /d 0 /f
-    call :RunOperation Registry reg add "HKCU\System\GameConfigStore" /v GameDVR_FSEBehaviorMode /t REG_DWORD /d 2 /f
-    call :RunOperation Registry reg add "HKCU\System\GameConfigStore" /v GameDVR_HonorUserFSEBehaviorMode /t REG_DWORD /d 1 /f
-    call :RunOperation Registry reg add "HKCU\System\GameConfigStore" /v GameDVR_DXGIHonorFSEWindowsCompatible /t REG_DWORD /d 1 /f
-    call :Log "Gaming tweaks: Game DVR disable requested by user"
+    call :Log "Gaming tweaks: Game DVR recording disabled"
 ) else (
-    call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\GameDVR" /v AllowGameDVR /t REG_DWORD /d 1 /f
-    call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\PolicyManager\default\ApplicationManagement\AllowGameDVR" /v value /t REG_DWORD /d 1 /f
-    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v AppCaptureEnabled /t REG_DWORD /d 1 /f
-    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v GameDVR_Enabled /t REG_DWORD /d 1 /f
-    call :RunOperation Registry reg add "HKCU\System\GameConfigStore" /v GameDVR_Enabled /t REG_DWORD /d 1 /f
-    call :RunOperation Registry reg add "HKCU\System\GameConfigStore" /v GameDVR_FSEBehaviorMode /t REG_DWORD /d 2 /f
-    call :RunOperation Registry reg add "HKCU\System\GameConfigStore" /v GameDVR_HonorUserFSEBehaviorMode /t REG_DWORD /d 1 /f
-    call :RunOperation Registry reg add "HKCU\System\GameConfigStore" /v GameDVR_DXGIHonorFSEWindowsCompatible /t REG_DWORD /d 1 /f
-    call :Log "Gaming tweaks: Game DVR enable requested for Game Bar capture"
+    call :Log "Gaming tweaks: existing Game DVR settings preserved"
 )
+
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" /v HwSchMode /t REG_DWORD /d 2 /f
 call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 0 /f
 call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" /v VisualFXSetting /t REG_DWORD /d 2 /f
@@ -571,7 +561,7 @@ echo   %CLR_TITLE%APPLYING NETWORK OPTIMIZATIONS%CLR_RESET%
 echo ========================================================================
 echo.
 echo [*] Applying safe TCP/IP and bandwidth tweaks for gaming...
-call :RunOperation Native netsh interface tcp set global autotuninglevel=highlyrestricted
+call :RunOperation Native netsh interface tcp set global autotuninglevel=normal
 call :RunOperation Native netsh interface tcp set global ecncapability=disabled
 call :RunOperation Native netsh interface tcp set global rss=enabled
 call :RunOperation Native netsh interface tcp set global rsc=disabled
@@ -1020,6 +1010,7 @@ call :RunOperation Registry reg add "HKCU\Software\Microsoft\GameBar" /v AllowAu
 call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\GameDVR" /v AllowGameDVR /t REG_DWORD /d 1 /f
 call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\PolicyManager\default\ApplicationManagement\AllowGameDVR" /v value /t REG_DWORD /d 1 /f
 call :RunOperation Registry reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v AppCaptureEnabled /f
+call :RunOperation Registry reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v HistoricalCaptureEnabled /f
 call :RunOperation Registry reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v GameDVR_Enabled /f
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\PriorityControl" /v Win32PrioritySeparation /t REG_DWORD /d 2 /f
 call :RunOperation Native bcdedit /deletevalue useplatformclock

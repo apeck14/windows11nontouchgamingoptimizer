@@ -14,7 +14,7 @@ Extract the repository ZIP, keeping `win11_nontouch_gaming_optimiser.bat` and `o
 
 Both presets enable System Protection on the Windows drive and verify a new, named restore point before optimization. The checkpoint frequency override is temporary; existing restore points and storage limits are preserved. If setup or creation fails, a continue/cancel choice defaults to cancel. Individual actions do not create restore points. Spotify is preserved; disabling Xbox services requires a separate selection.
 
-Both presets enable windowed-game optimization for compatible DX10/DX11 games, remove forced debug timer overrides, and **disable memory integrity (HVCI) by default**. This reduces security and may block anti-cheat protected games. [M] can re-enable it; restart afterward. Policy/UEFI enforcement is not bypassed. Other virtualization/VBS services are left unchanged.
+Both presets default to disabling Game DVR recording (answer No to preserve existing capture settings; Game Bar stays installed) and restore normal TCP receive-window growth. Both enable windowed-game optimization for compatible DX10/DX11 games, remove forced debug timer overrides, and **disable memory integrity (HVCI) by default**. This reduces security and may block anti-cheat protected games. [M] can re-enable it; restart afterward. Policy/UEFI enforcement is not bypassed. Other virtualization/VBS services are left unchanged.
 
 [G] reports current/highest enumerated refresh rates at the current resolution and saved GPU preferences. It never changes resolution or guesses which GPU a game actually uses. Review Windows Graphics/Advanced display settings for per-game exceptions.
 

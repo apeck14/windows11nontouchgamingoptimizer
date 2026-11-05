@@ -148,6 +148,30 @@ class Regressions(unittest.TestCase):
             self.assertIn(operation, trace)
         self.assertNotIn('bcdedit /set', trace)
 
+    def test_capture_opt_out_preserves_settings_and_opt_in_disables_recording(self):
+        for disable in ['0', '1']:
+            with self.subTest(disable=disable):
+                result, trace, _ = self.run_batch(mock_commands(routine('ApplyGamingTweaks')), 'ApplyGamingTweaks',
+                    extra=LOG + MOCK + stub('BackupRegistryKeys'),
+                    env={'DVR_PREF_SET':'1', 'DISABLE_DVR':disable})
+                self.assertEqual(result.returncode, 0)
+                writes = [line for line in trace.splitlines() if 'reg add' in line and
+                          ('GameDVR' in line or 'GameConfigStore' in line)]
+                if disable == '0':
+                    self.assertEqual(writes, [])
+                else:
+                    self.assertEqual(len(writes), 4)
+                    self.assertTrue(all('/d 0 /f' in line for line in writes))
+                    self.assertTrue(any('HistoricalCaptureEnabled' in line for line in writes))
+                self.assertNotIn('FSEBehaviorMode', trace)
+
+    def test_both_network_paths_enable_normal_window_growth(self):
+        for name in ['ApplyNetworkTweaksSafe', 'ApplyNetworkTweaks']:
+            result, trace, _ = self.run_batch(mock_commands(routine(name)), name, extra=LOG + MOCK)
+            self.assertEqual(result.returncode, 0)
+            self.assertIn('autotuninglevel=normal', trace)
+            self.assertNotIn('autotuninglevel=highlyrestricted', trace)
+
     def test_memory_and_pagefile_routines_complete_for_all_ram_ranges(self):
         for name in ['OptimizeMemory', 'OptimizePageFile']:
             for ram in (['', '4', '8', '16', '32'] if name == 'OptimizePageFile' else ['4', '8', '32']):
