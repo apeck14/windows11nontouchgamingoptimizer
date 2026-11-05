@@ -226,7 +226,7 @@ foreach($expected in @('ShaderQuality@0;19450;7764 = Low','ShadingQuality@0;1447
     'WaterCausticsMode@0;41499;11445 = Off','WaterWaveWetness@0;57752;20945 = false',
     'WeatherGridVolumesQuality@0;38459;58629 = Low','AmbientLightingQuality@0;20439;58629 = Low',
     'ScreenSpaceShadowQuality@0;42742;43096 = Low','VolumetricQuality@0;4276;43096 = QUALITY_MEDIUM',
-    'Tessellation@0;27349;11445 = 1_Near','GPUUploadHeaps@0;57752;20945 = true',
+    'Tessellation@0;27349;11445 = 1_Near','GPUUploadHeaps@0;57752;20945 = false',
     'TextureQuality@0;61129;7764 = 0','ModelQuality@0;15002;43096 = High Quality')) {
     if(-not $updated.Contains($expected)){throw "Unexpected result: $expected"}
 }
@@ -235,7 +235,7 @@ if(@(Get-ChildItem (Get-Mw4BackupRoot) -Directory).Count -ne 1){throw 'Repeated 
 Restore-Mw4Optimization
 if((Get-Mw4Hash ([IO.File]::ReadAllBytes($path))) -ne $hash){throw 'Expanded preset did not restore exactly'}
 ''')
-        self.assertEqual(sum(r['Status'] == 'Applied' and r['Operation'].startswith('MW4 config ') for r in rows), 14)
+        self.assertEqual(sum(r['Status'] == 'Applied' and r['Operation'].startswith('MW4 config ') for r in rows), 13)
         self.assertFalse(any(r['Status'] == 'Failed' for r in rows))
 
     def test_expanded_preset_keeps_lower_quality_and_skips_changed_value_domains(self):
@@ -253,8 +253,84 @@ GPUUploadHeaps@0;1;1 = 2 // 0 to 3
 SSRQuality@0;1;1 = High // one of Low, Medium, High
 '@
 $result=Convert-Mw4Config $text $true
-if($result.Text -cne $text -or $result.Changes.Count -ne 0 -or $result.Skipped -ne 3){throw 'Raised quality or forced incompatible values'}
+if($result.Text -cne $text -or $result.Changes.Count -ne 0 -or $result.Skipped -ne 2){throw 'Raised quality or forced incompatible values'}
 ''')
+
+    def test_antilag2_hardware_gate_excludes_old_unknown_and_other_vendor_gpus(self):
+        self.run_case(r'''
+foreach($name in @('AMD Radeon RX 5500 XT','AMD Radeon RX 6800M','AMD Radeon RX 7600S',
+    'AMD Radeon RX 7900XTX','AMD Radeon RX 9070 XT','AMD Radeon(TM) 610M',
+    'AMD Radeon 680M','AMD Radeon 780M Graphics','AMD Radeon 890M','AMD Radeon(TM) 8060S Graphics')) {
+    $gpu=[pscustomobject]@{PNPDeviceID='PCI\VEN_1002&DEV_1234';Name=$name}
+    if(-not (Test-Mw4AntiLag2Support @($gpu))){throw "Missed RDNA GPU: $name"}
+    foreach($vendor in @('10DE','8086','10020')) {
+        $gpu.PNPDeviceID="PCI\VEN_$vendor"
+        if(Test-Mw4AntiLag2Support @($gpu)){throw "Accepted wrong vendor: $vendor"}
+    }
+}
+foreach($name in @('AMD Radeon RX 580','AMD Radeon RX Vega 64','AMD Radeon VII',
+    'AMD Radeon HD 5770','AMD Radeon(TM) Graphics','Microsoft Basic Display Adapter','')) {
+    if(Test-Mw4AntiLag2Support @([pscustomobject]@{PNPDeviceID='PCI\VEN_1002';Name=$name})){throw "Accepted unknown/old GPU: $name"}
+}
+if(Test-Mw4AntiLag2Support @()){throw 'Accepted empty inventory'}
+if(Test-Mw4AntiLag2Support @([pscustomobject]@{PNPDeviceID='PCI\VEN_1002'})){throw 'Accepted missing model'}
+if(-not (Test-Mw4AntiLag2Support @(
+    [pscustomobject]@{PNPDeviceID='PCI\VEN_8086';Name='Intel UHD Graphics'},
+    [pscustomobject]@{PNPDeviceID='PCI\VEN_1002';Name='AMD Radeon RX 6600'}))){throw 'Missed secondary adapter'}
+''')
+
+    def test_antilag2_only_changes_compatible_existing_values_on_supported_hardware(self):
+        self.run_case(r'''
+$text=@'
+AmdAntilag2@0;57752;20945 = false
+AmdAntilag2:0.0 = "false" // one of [false, true]
+AmdAntilag2@1;1;1 = true
+AmdAntilag2@2;1;1 = 2 // 0 to 3
+AmdAntilag2@3;1;1 = false // one of false, disabled
+'@
+$result=Convert-Mw4Config $text $false $true
+if($result.Changes.Count -ne 2 -or $result.Skipped -ne 2){throw 'Incorrect compatible changes'}
+$expected=$text -replace '(?m)(^AmdAntilag2@0;57752;20945 = )false','$1true' -replace '= "false"','= "true"'
+if($result.Text -cne $expected){throw 'Changed incompatible values or formatting'}
+if((Convert-Mw4Config $result.Text $false $true).Changes.Count){throw 'Not idempotent'}
+foreach($nvidia in @($false,$true)) {
+    if((Convert-Mw4Config $text $nvidia).Text -cne $text){throw 'Changed Anti-Lag 2 without eligible Radeon'}
+}
+if((Convert-Mw4Config 'Unrelated@0;1;1 = false' $false $true).Text -cne 'Unrelated@0;1;1 = false'){throw 'Added missing setting'}
+''')
+
+    def test_radeon_antilag2_file_apply_noop_and_restore_preserve_upload_heaps(self):
+        rows = self.run_case(r'''
+function Get-CimInstance { [pscustomobject]@{PNPDeviceID='PCI\VEN_1002';Name='AMD Radeon RX 7800 XT'} }
+$text="AmdAntilag2@0;57752;20945 = false`r`nGPUUploadHeaps@0;57752;20945 = false"
+$path=Join-Path $root 's.1.0.cod26.txt'
+[IO.File]::WriteAllText($path,$text,[Text.UTF8Encoding]::new($true))
+$hash=Get-Mw4Hash ([IO.File]::ReadAllBytes($path))
+Invoke-Mw4Optimization
+if([IO.File]::ReadAllText($path) -cne $text.Replace('AmdAntilag2@0;57752;20945 = false','AmdAntilag2@0;57752;20945 = true')){throw 'Incorrect Radeon preset'}
+Invoke-Mw4Optimization
+if(@(Get-ChildItem (Get-Mw4BackupRoot) -Directory).Count -ne 1){throw 'No-op replaced backup'}
+Restore-Mw4Optimization
+if((Get-Mw4Hash ([IO.File]::ReadAllBytes($path))) -ne $hash){throw 'Restore changed original bytes'}
+''')
+        self.assertEqual([r['Status'] for r in rows], ['Applied', 'AlreadyConfigured', 'Applied'])
+
+    def test_upload_heaps_and_unsupported_antilag2_are_noops_without_backups(self):
+        rows = self.run_case(r'''
+$path=Join-Path $root 's.1.0.cod26.txt'
+foreach($name in @('AMD Radeon RX 580','AMD Radeon(TM) Graphics')) {
+    $script:gpuName=$name
+    function Get-CimInstance { [pscustomobject]@{PNPDeviceID='PCI\VEN_1002';Name=$script:gpuName} }
+    foreach($value in @('true','false','2')) {
+        $text="GPUUploadHeaps@0;1;1 = $value`r`nAmdAntilag2@0;1;1 = false"
+        [IO.File]::WriteAllText($path,$text)
+        Invoke-Mw4Optimization
+        if([IO.File]::ReadAllText($path) -cne $text){throw 'Changed preserved settings'}
+        if(Test-Path (Get-Mw4BackupRoot)){throw 'Created backup for a no-op'}
+    }
+}
+''')
+        self.assertTrue(all(r['Status'] == 'Unsupported' for r in rows))
 
     def test_readonly_files_and_post_apply_edits_are_preserved(self):
         rows = self.run_case(r'''

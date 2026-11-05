@@ -15,6 +15,8 @@ Full optimization attempts a verified restore point; failure defaults to cancell
 
 **Recovery > 5** restores the latest game backup from `logs/mw4-backups/`, preserving subsequent edits. Game apply/restore requires the game closed. No-op runs keep the previous backup.
 
+The game preset preserves GPU upload heaps and enables in-game Anti-Lag 2 only for identified RDNA Radeon hardware with a compatible existing setting. Runtime support still depends on the game and driver.
+
 Each action shows results; **P** summarizes the session. Diagnostics and selected registry backups live in `logs/`. Read-back verifies settings, not FPS gains; benchmark in-game.
 
 ## Editing

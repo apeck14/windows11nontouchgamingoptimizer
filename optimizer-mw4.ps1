@@ -30,8 +30,20 @@ function Get-Mw4Files {
     }
 }
 
+function Test-Mw4AntiLag2Support {
+    param([object[]]$Adapters)
+    # RDNA 1+: https://gpuopen.com/anti-lag-2/. Unknown model names stay unchanged.
+    foreach ($adapter in $Adapters) {
+        if ($adapter.PNPDeviceID -match 'VEN_1002(?:&|$)' -and
+            ($adapter.Name -replace '\(TM\)','') -match '\bRadeon\s+(?:RX\s+[5-9]\d{3}(?:M|S|XTX?|GRE)?\b|(?:610|660|680|740|760|780|820|840|860|880|890)M\b|(?:8040|8050|8060|8065)S\b)') {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Convert-Mw4Config {
-    param([string]$Text, [bool]$Nvidia)
+    param([string]$Text, [bool]$Nvidia, [bool]$AmdAntiLag2 = $false)
     # Values come from the game's descriptions/ranges. Keep lower existing quality levels.
     $rules = @{
         VSync=@('disabled'); CapFps=@('false')
@@ -44,9 +56,9 @@ function Convert-Mw4Config {
         WaterCausticsMode=@('Off'); WaterWaveWetness=@('false'); WeatherGridVolumesQuality=@('Low','Off')
         AmbientLightingQuality=@('Low','Off'); ScreenSpaceShadowQuality=@('Low','Off')
         VolumetricQuality=@('QUALITY_MEDIUM','QUALITY_LOW'); Tessellation=@('1_Near','0_Off')
-        GPUUploadHeaps=@('true')
     }
     if ($Nvidia) { $rules.NvidiaReflex=@('Enabled + boost') }
+    if ($AmdAntiLag2) { $rules.AmdAntilag2=@('true') }
     $changes = [Collections.Generic.List[object]]::new()
     $counts = @{Found=0;Skipped=0}
     $pattern = '(?m)^(?<prefix>[ \t]*(?<key>\w+)(?:@[0-9;]+|:[0-9.]+)[ \t]*=[ \t]*)(?<value>[^\r\n]*?)(?<suffix>[ \t]*(?://[^\r\n]*)?)(?=\r?$)'
@@ -166,7 +178,9 @@ function Invoke-Mw4Optimization {
         Write-OperationResult Unsupported 'MW4 game configs' 'No retail Call of Duty config found in LocalAppData or Documents.'
         return
     }
-    $nvidia = [bool]@(Get-CimInstance Win32_VideoController -ErrorAction Stop | Where-Object { $_.PNPDeviceID -match 'VEN_10DE' }).Count
+    $adapters = @(Get-CimInstance Win32_VideoController -ErrorAction Stop)
+    $nvidia = [bool]@($adapters | Where-Object { $_.PNPDeviceID -match 'VEN_10DE' }).Count
+    $amdAntiLag2 = Test-Mw4AntiLag2Support $adapters
     $plans = @()
     foreach ($file in $files) {
         try {
@@ -177,7 +191,7 @@ function Invoke-Mw4Optimization {
             $bytes = [IO.File]::ReadAllBytes($file.FullName)
             $encoding = Get-Mw4Encoding $bytes
             $text = $encoding.Encoding.GetString($bytes,$encoding.Offset,$bytes.Length-$encoding.Offset)
-            $converted = Convert-Mw4Config $text $nvidia
+            $converted = Convert-Mw4Config $text $nvidia $amdAntiLag2
             if ($converted.Skipped) { Write-OperationResult Unsupported "MW4 config $($file.Name)" "$($converted.Skipped) settings had an incompatible value/range and were preserved." }
             if (-not $converted.Changes.Count) {
                 if ($converted.Compatible) {
