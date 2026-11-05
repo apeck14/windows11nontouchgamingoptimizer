@@ -119,6 +119,8 @@ echo.
 set "choice="
 set /p "choice=> "
 set "choice=%choice:~0,1%"
+set "OPTIMIZER_ACTION_ID=%RANDOM%-%RANDOM%"
+if /I "%choice%"=="P" set "OPTIMIZER_ACTION_ID="
 if /I "%choice%"=="1" (call :FullOptimization & call :PauseReturn & goto Menu)
 if /I "%choice%"=="F" (call :FullOptimization & call :PauseReturn & goto Menu)
 if /I "%choice%"=="2" (call :RunRecommended & call :PauseReturn & goto Menu)

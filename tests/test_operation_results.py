@@ -161,6 +161,43 @@ if((Show-OperationSummary) -ne 2){throw 'Unverified was counted as success'}
 ''')
         self.assertIn('INCOMPLETE VERIFICATION', stdout)
 
+    def test_summary_counts_only_confirmed_recycling_and_stays_brief(self):
+        _, output = self.run_case(r'''
+Write-OperationResult Applied 'Recycle C:\first.zip' 'long file detail' $true 2GB $true
+Write-OperationResult Applied 'Recycle C:\second.zip' 'long file detail' $true 3GB
+Write-OperationResult Failed 'Recycle C:\failed.zip' 'DO_NOT_REPEAT_RAW_ERROR' $false 100GB
+Write-OperationResult Applied 'HKCU\Software\Microsoft\GameBar [AutoGameModeEnabled]' 'configured' $true
+Write-OperationResult RestartRequired 'Memory integrity' 'restart' $true
+Write-Host 'SUMMARY_START'
+if((Show-OperationSummary) -ne 1){throw 'Failed operation was not reflected in exit code'}
+''')
+        summary = output.split('SUMMARY_START', 1)[1]
+        self.assertIn('2 files | ~5.00 GB | Duplicates: 1', summary)
+        self.assertIn('Gaming, graphics & input', summary)
+        self.assertIn('Restart: needed', summary)
+        self.assertIn('1 failed', summary)
+        self.assertNotIn('DO_NOT_REPEAT_RAW_ERROR', summary)
+        self.assertNotIn('C:\\first.zip', summary)
+        self.assertLess(len(summary.splitlines()), 15)
+
+    def test_summary_separates_actions_but_keeps_session_report(self):
+        _, output = self.run_case(r'''
+$env:OPTIMIZER_ACTION_ID='first'
+Write-OperationResult Applied 'Memory compression' 'enabled' $true
+$env:OPTIMIZER_ACTION_ID='second'
+Write-OperationResult Applied 'Recycle C:\copy.zip' 'recycled' $true 1GB $true
+Write-Host 'CURRENT_START'
+$null=Show-OperationSummary
+$env:OPTIMIZER_ACTION_ID=''
+Write-Host 'SESSION_START'
+$null=Show-OperationSummary
+''')
+        current, session = output.split('CURRENT_START', 1)[1].split('SESSION_START', 1)
+        self.assertNotIn('Memory & security', current)
+        self.assertIn('1 file | ~1.00 GB', current)
+        self.assertIn('Memory & security', session)
+        self.assertIn('1 file | ~1.00 GB', session)
+
     def test_power_plan_creation_and_activation_are_read_back(self):
         rows, _ = self.run_case(r'''
 function Get-PowerCapabilities {@{ModernStandby=$false;Portable=$false}}

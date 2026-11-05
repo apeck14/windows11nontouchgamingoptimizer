@@ -28,7 +28,7 @@ Cleanup never permanently deletes files or uninstalls apps. It skips system/appl
 
 Logs and `operation_results_<timestamp>.jsonl` are saved in `logs/`. Results distinguish **Applied**, **AlreadyConfigured**, **Unsupported**, **Failed**, **RestartRequired**, and **Unverified**. Unverified means the command succeeded without an independent state check. Results cover the current session, not changes made afterward by Windows or other software.
 
-Review failures and restart-required entries before rerunning. Use the individual menu actions when only part of a run needs repeating.
+After each action, a brief summary shows confirmed changes, recycled files/GB, and restart or review needs. **P** summarizes the whole session; full details remain in the logs. Review failures and restart-required entries before rerunning. Use the individual menu actions when only part of a run needs repeating.
 
 **Recovery:** use **R** (or `rstrui.exe`) and select the logged Gaming Optimizer checkpoint. Restore points can expire and are not full backups. **Undo** restores the saved mouse settings and resets selected settings to defaults; it does not fully reverse optimization. Registry exports cover selected keys only. Full recovery, including deleted files and removed apps, requires an independent backup made beforehand.
 

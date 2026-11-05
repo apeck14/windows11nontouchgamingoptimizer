@@ -9,11 +9,13 @@ param(
 $ErrorActionPreference = 'Stop'
 
 function Write-OperationResult {
-    param([string]$Status, [string]$Operation, [string]$Detail, [bool]$Verified = $false)
+    param([string]$Status, [string]$Operation, [string]$Detail, [bool]$Verified = $false, [long]$Bytes = 0, [bool]$Duplicate = $false)
     $entry = [ordered]@{
         Time = (Get-Date).ToString('o'); Status = $Status; Operation = $Operation
         Detail = $Detail; Verified = $Verified
     }
+    if ($env:OPTIMIZER_ACTION_ID) { $entry.Action = $env:OPTIMIZER_ACTION_ID }
+    if ($Operation -like 'Recycle *') { $entry.Bytes=$Bytes; $entry.Duplicate=$Duplicate }
     if (-not $env:OPTIMIZER_RESULTS) { throw 'Result journal is not configured.' }
     $entry | ConvertTo-Json -Compress -Depth 8 | Add-Content -LiteralPath $env:OPTIMIZER_RESULTS -Encoding UTF8
     $message = '[{0}] {1}: {2}' -f $Status.ToUpperInvariant(), $Operation, $Detail
@@ -507,16 +509,43 @@ function Invoke-GenericChange {
 function Show-OperationSummary {
     if (-not (Test-Path -LiteralPath $env:OPTIMIZER_RESULTS)) { Write-Host 'No operations recorded in this session.'; return 0 }
     $entries = @(Get-Content -LiteralPath $env:OPTIMIZER_RESULTS | ForEach-Object { $_ | ConvertFrom-Json -ErrorAction Stop })
+    if ($env:OPTIMIZER_ACTION_ID) { $entries = @($entries | Where-Object Action -eq $env:OPTIMIZER_ACTION_ID) }
     if (-not $entries.Count) { Write-Host 'No operations recorded in this session.'; return 0 }
-    Write-Host "`nOPERATION RESULTS - cumulative for this session"
-    $entries | Group-Object Status | Sort-Object Name | ForEach-Object { Write-Host ('  {0}: {1}' -f $_.Name, $_.Count) }
-    $attention = @($entries | Where-Object Status -In @('Failed','RestartRequired','Unverified','Unsupported'))
-    foreach ($entry in $attention) { Write-Host ('  [{0}] {1}: {2}' -f $entry.Status, $entry.Operation, $entry.Detail) }
-    Write-Host "Journal: $env:OPTIMIZER_RESULTS"
-    Write-Host 'Verified configuration is not a measurement of FPS or latency. Some saved settings activate after restart.'
-    if (@($entries | Where-Object Status -EQ 'Failed').Count) { Write-Host 'PARTIAL RESULT: one or more operations failed.'; return 1 }
-    if (@($entries | Where-Object Status -In @('Unverified','RestartRequired')).Count) { Write-Host 'INCOMPLETE VERIFICATION: review unverified and restart-required entries.'; return 2 }
-    Write-Host 'All supported, attempted operations have verified requested states.'
+    $scope = if ($env:OPTIMIZER_ACTION_ID) {'this action'} else {'this session'}
+    Write-Host "`n========== SUMMARY - $scope =========="
+    $changed = @($entries | Where-Object { $_.Verified -and $_.Status -in @('Applied','RestartRequired') })
+    $areas = @($changed | Where-Object { $_.Operation -notlike 'Recycle *' -and $_.Operation -ne 'System restore point' } | ForEach-Object {
+        switch -Regex ($_.Operation) {
+            '^Service |^Task ' {'Services & background tasks'; break}
+            'GameBar|GameDVR|GameConfigStore|GraphicsDrivers|DirectX|Mouse|mouclass|kbdclass' {'Gaming, graphics & input'; break}
+            '^Memory|Memory Management|^Page file|DeviceGuard' {'Memory & security'; break}
+            '^powercfg|power plan|^AC power' {'Power settings'; break}
+            'Tcpip|^netsh|DeliveryOptimization' {'Networking'; break}
+            'Visual|Desktop|WindowMetrics|DWM|Explorer' {'Desktop & visuals'; break}
+            default {'Other Windows settings'}
+        }
+    } | Sort-Object -Unique)
+    if ($areas.Count) { Write-Host ('Updated: '+($areas -join '; ')) }
+    else { Write-Host 'No new configuration changes confirmed.' }
+    if (@($changed | Where-Object Operation -eq 'System restore point').Count) { Write-Host 'Restore point: created and verified. Use R to restore.' }
+    $recycled = @($changed | Where-Object Operation -like 'Recycle *')
+    if ($recycled.Count) {
+        $gb = ($recycled | Measure-Object Bytes -Sum).Sum / 1GB
+        $duplicates = @($recycled | Where-Object Duplicate -eq $true).Count
+        $noun = if ($recycled.Count -eq 1) {'file'} else {'files'}
+        Write-Host ('Recycled: {0} {1} | ~{2:N2} GB | Duplicates: {3}' -f $recycled.Count,$noun,$gb,$duplicates)
+        Write-Host 'Space is still occupied in the Recycle Bin; empty it manually to free space.'
+    } elseif (@($entries | Where-Object Operation -like 'Recycle *').Count) {
+        Write-Host 'Recycled: no files.'
+    }
+    if (@($entries | Where-Object Status -eq 'RestartRequired').Count) { Write-Host 'Restart: needed to finish applying some settings.' }
+    $failed = @($entries | Where-Object Status -eq 'Failed').Count
+    $unverified = @($entries | Where-Object Status -eq 'Unverified').Count
+    $skipped = @($entries | Where-Object Status -eq 'Unsupported').Count
+    if ($failed -or $unverified -or $skipped) { Write-Host ("Review: $failed failed; $unverified unverified; $skipped unavailable/skipped.") }
+    Write-Host ('Details: '+$env:LOG_FILE)
+    if ($failed) { Write-Host 'PARTIAL RESULT - see the log for failures.'; return 1 }
+    if ($unverified -or @($entries | Where-Object Status -eq 'RestartRequired').Count) { Write-Host 'INCOMPLETE VERIFICATION - restart/review as noted above.'; return 2 }
     return 0
 }
 

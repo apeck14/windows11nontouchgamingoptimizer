@@ -304,7 +304,7 @@ function Invoke-RecycleFiles($Files) {
             Move-CleanupFileToRecycleBin $file.Path
             $detail = 'Shell recycling completed; original path is absent.'
             if ($file.KeepPath) { $detail += ' Retained identical copy: '+$file.KeepPath }
-            Write-OperationResult Applied ('Recycle '+$file.Path) $detail $true
+            Write-OperationResult Applied ('Recycle '+$file.Path) $detail $true $file.Bytes ([bool]$file.KeepPath)
         } catch {
             $failed = $true
             Write-OperationResult Failed ('Recycle '+$file.Path) $_.Exception.Message
