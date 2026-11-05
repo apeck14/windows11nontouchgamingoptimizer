@@ -668,7 +668,7 @@ function Show-OperationSummary {
     $driverChanges = @($changed | Where-Object Operation -like 'MW4 NVIDIA *').Count
     if ($gameChanges -or $driverChanges) {
         Write-Host ("  Game settings  $gameChanges updated; $driverChanges NVIDIA settings updated.") -ForegroundColor Green
-        Write-Host '  Recovery       Restore MW4 / Warzone settings undoes this preset.' -ForegroundColor DarkGray
+        Write-Host '  Recovery       Restore the latest MW4 / Warzone backup.' -ForegroundColor DarkGray
     }
     if (@($changed | Where-Object Operation -eq 'System restore point').Count) { Write-Host '  Restore point  Saved and verified. Restore via Recovery.' -ForegroundColor Green }
     $recycled = @($changed | Where-Object Operation -like 'Recycle *')

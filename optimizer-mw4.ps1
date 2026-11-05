@@ -70,6 +70,7 @@ function Convert-Mw4Config {
         } elseif ($key -eq 'FilmGrain' -and $comment -match '//\s*0(?:\.0+)? to 1(?:\.0+)?\s*$') {
             $number = 0.0
             $compatible = [double]::TryParse($current,[Globalization.NumberStyles]::Float,[Globalization.CultureInfo]::InvariantCulture,[ref]$number) -and $number -ge 0 -and $number -le 1
+            if ($compatible -and $number -eq 0) { return $m.Value }
         }
         if (-not $compatible) { $skipped.Add($key); return $m.Value }
         $changes.Add([pscustomobject]@{Key=$key;Before=$current;After=$target})
@@ -227,6 +228,7 @@ function Invoke-Mw4Optimization {
         foreach ($change in $driverPlan) {
             try {
                 Assert-Mw4Closed
+                $driver.Reload()
                 $profile = $driver.FindProfile($change.App)
                 $now = $driver.Read($profile,$change.Id)
                 if ($null -eq $now -or $now.Data -ne $change.Before -or $now.UserOverride -ne $change.UserOverride) { throw 'Driver setting changed since backup; left unchanged.' }
@@ -273,6 +275,8 @@ function Restore-Mw4Optimization {
             try {
                 # The manifest may only restore the DWORD settings owned by this preset.
                 if ($change.App -notmatch '^cod(?:\d+-cod)?\.exe$' -or $change.Id -notin @(0x00A879CF,0x10835002,0x0064B541,0x1057EB71)) { throw 'Unrecognized driver backup entry.' }
+                Assert-Mw4Closed
+                $driver.Reload()
                 $profile = $driver.FindProfile($change.App)
                 if ($profile -eq [IntPtr]::Zero) { throw 'Original application profile is no longer available.' }
                 $now = $driver.Read($profile,$change.Id)
@@ -281,7 +285,6 @@ function Restore-Mw4Optimization {
                     continue
                 }
                 if (-not $now -or $now.Data -ne $change.After -or -not $now.UserOverride) { throw 'Driver setting changed after optimization; left unchanged.' }
-                Assert-Mw4Closed
                 if ($change.UserOverride) { $driver.Write($profile,$change.Id,$change.Before) }
                 else { $driver.Reset($profile,$change.Id) }
                 $driver.Save()

@@ -23,7 +23,9 @@ function Open-Mw4Driver { throw 'Must not access the real NVIDIA driver' }
 
 DRIVER = r'''
 class FakeDriver {
+    # State models the system database; Cache models the loaded NVAPI session.
     [hashtable]$State=@{}
+    [hashtable]$Cache=@{}
     [int]$Writes=0
     [int]$Resets=0
     [int]$Saves=0
@@ -34,26 +36,27 @@ class FakeDriver {
         $this.State[0x10835002]=@{Data=60;UserOverride=$false}
         $this.State[0x0064B541]=@{Data=0;UserOverride=$false}
         $this.State[0x1057EB71]=@{Data=5;UserOverride=$false}
+        $this.Reload()
     }
     [IntPtr] FindProfile([string]$app) { return [IntPtr]1 }
-    [object] Read([IntPtr]$p,[int]$id) { return $this.State[$id] }
+    [object] Read([IntPtr]$p,[int]$id) { return $this.Cache[$id] }
     [void] Write([IntPtr]$p,[int]$id,[int]$v) {
         $this.Writes++
-        if (-not $this.SilentFailure) { $this.State[$id]=@{Data=$v;UserOverride=$true} }
+        if (-not $this.SilentFailure) { $this.Cache[$id]=@{Data=$v;UserOverride=$true} }
     }
     [void] Reset([IntPtr]$p,[int]$id) {
         $this.Resets++
         $value=if($id -eq 0x10835002){60}elseif($id -eq 0x1057EB71){5}else{0}
-        $this.State[$id]=@{Data=$value;UserOverride=$false}
+        $this.Cache[$id]=@{Data=$value;UserOverride=$false}
     }
-    [void] Save() { $this.Saves++; if($this.FailSave){throw 'Save failed'} }
-    [void] Reload() {}
+    [void] Save() { $this.Saves++; if($this.FailSave){throw 'Save failed'}; $this.State=$this.Cache.Clone() }
+    [void] Reload() { $this.Cache=$this.State.Clone() }
     [void] Dispose() {}
 }
 $script:fakeDriver=[FakeDriver]::new()
 $driver=$script:fakeDriver
 function Get-CimInstance { [pscustomobject]@{PNPDeviceID='PCI\VEN_10DE'} }
-function Open-Mw4Driver { $script:fakeDriver }
+function Open-Mw4Driver { $script:fakeDriver.Reload(); $script:fakeDriver }
 '''
 
 
@@ -267,6 +270,43 @@ $failed=$false
 try {Set-Mw4File $path $hash ([Text.Encoding]::UTF8.GetBytes('replace'))} catch {$failed=$true}
 if(-not $failed -or [IO.File]::ReadAllText($path) -ne 'newer user settings'){throw 'Overwrote concurrent edits'}
 ''')
+
+    def test_zero_film_grain_does_not_create_repeated_changes_or_backups(self):
+        rows = self.run_case(r'''
+$path=Join-Path $root 's.1.0.cod26.txt'
+$text='FilmGrain@0;1;1 = 0.000000 // 0.000000 to 1.000000'
+[IO.File]::WriteAllText($path,$text)
+Invoke-Mw4Optimization
+if([IO.File]::ReadAllText($path) -cne $text -or (Test-Path (Get-Mw4BackupRoot))){throw 'Rewrote an already disabled effect'}
+''')
+        self.assertEqual([r['Status'] for r in rows], ['AlreadyConfigured'])
+
+    def test_driver_edit_after_planning_is_preserved(self):
+        rows = self.run_case(DRIVER+r'''
+[IO.File]::WriteAllText((Join-Path $root 's.1.0.cod26.txt'),'1')
+$script:checks=0
+function Assert-Mw4Closed {
+    $script:checks++
+    if($script:checks -eq 3){$script:fakeDriver.State[0x00A879CF]=@{Data=2;UserOverride=$true}}
+}
+Invoke-Mw4Optimization
+if($driver.State[0x00A879CF].Data -ne 2 -or $driver.Writes -ne 3){throw 'Overwrote a newer driver setting with cached state'}
+''')
+        self.assertEqual(sum(r['Status'] == 'Failed' for r in rows), 1)
+
+    def test_driver_edit_during_restore_is_preserved(self):
+        rows = self.run_case(DRIVER+r'''
+[IO.File]::WriteAllText((Join-Path $root 's.1.0.cod26.txt'),'1')
+Invoke-Mw4Optimization
+$script:checks=0
+function Assert-Mw4Closed {
+    $script:checks++
+    if($script:checks -eq 2){$script:fakeDriver.State[0x00A879CF]=@{Data=2;UserOverride=$true}}
+}
+Restore-Mw4Optimization
+if($driver.State[0x00A879CF].Data -ne 2 -or $driver.Writes -ne 4){throw 'Restore overwrote a newer driver setting with cached state'}
+''')
+        self.assertEqual(sum(r['Status'] == 'Failed' for r in rows), 1)
 
     def test_driver_deduplicates_profile_and_restores_overrides_and_inheritance(self):
         rows = self.run_case(DRIVER+r'''
