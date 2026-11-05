@@ -182,6 +182,7 @@ if((Show-OperationSummary) -ne 2){throw 'Unverified was counted as success'}
 
     def test_power_plan_creation_and_activation_are_read_back(self):
         rows, _ = self.run_case(r'''
+function Get-PowerCapabilities {@{ModernStandby=$false;Portable=$false}}
 $script:active=''
 $guid='11111111-2222-3333-4444-555555555555'
 function Invoke-NativeOperation {param($Program,$Arguments)
@@ -229,6 +230,63 @@ function Invoke-NativeOperation {throw 'Read-only smoke test must never write'}
 $null=Invoke-Operation ('Registry reg add "'+$path+'" /v '+$name+' /t '+$type+' /d "'+$before.Value+'" /f')
 ''')
         self.assertEqual([r['Status'] for r in rows], ['AlreadyConfigured'])
+
+    def test_portable_power_mode_applies_verifies_and_reports_noop_failure(self):
+        rows, _ = self.run_case(r'''
+function Get-PowerCapabilities {@{ModernStandby=$true;Portable=$true}}
+$script:acMode=[guid]::Empty; $script:apply=$true
+function Get-ACPowerMode {$script:acMode}
+function Set-ACPowerMode {param($Mode) if($script:apply){$script:acMode=$Mode}}
+function Invoke-NativeOperation {throw 'Must not duplicate or change portable power plans'}
+$null=Invoke-Operation 'Plan Ultimate'
+$null=Invoke-Operation 'Plan Ultimate'
+$script:acMode=[guid]::Empty; $script:apply=$false
+$null=Invoke-Operation 'Plan Ultimate'
+''')
+        self.assertEqual([r['Status'] for r in rows], ['Applied','AlreadyConfigured','Failed'])
+
+    def test_desktop_keeps_performance_plan_path(self):
+        rows, _ = self.run_case(r'''
+function Get-PowerCapabilities {@{ModernStandby=$false;Portable=$false}}
+function Get-ACPowerMode {throw 'Desktop must use existing plan path'}
+function Invoke-NativeOperation {param($Program,$Arguments)
+    [pscustomobject]@{Code=0;Output='Power Scheme GUID: 11111111-1111-1111-1111-111111111111'}
+}
+function Invoke-GenericChange {param($Tokens)
+    if(($Tokens -join ' ') -ne 'powercfg -setactive 11111111-1111-1111-1111-111111111111'){throw 'Wrong plan'}
+    Write-OperationResult Applied 'Desktop plan' 'Verified by fixture' $true
+}
+$null=Invoke-Operation 'Plan Ultimate'
+''')
+        self.assertEqual([r['Status'] for r in rows], ['Applied','Applied'])
+
+    def test_hibernation_preserved_for_portables_and_modern_standby(self):
+        rows, _ = self.run_case(r'''
+$script:portable=$true; $script:acModern=$false
+function Get-PowerCapabilities {@{Portable=$script:portable;ModernStandby=$script:acModern}}
+function Invoke-GenericChange {param($Tokens)
+    if($script:portable -or $script:acModern){throw 'Hibernation must be preserved'}
+    Write-OperationResult Applied 'Desktop hibernation' ($Tokens -join ' ')
+}
+$null=Invoke-Operation 'Hibernation Cleanup'
+$script:portable=$false; $script:acModern=$true
+$null=Invoke-Operation 'Hibernation Cleanup'
+$script:acModern=$false
+$null=Invoke-Operation 'Hibernation Cleanup'
+''')
+        self.assertEqual([r['Status'] for r in rows], ['AlreadyConfigured','AlreadyConfigured','Applied'])
+        self.assertEqual(rows[2]['Detail'], 'powercfg /h off')
+
+    def test_pagefile_enables_auto_and_checks_readback(self):
+        rows, _ = self.run_case(r'''
+$script:auto=$false; $script:apply=$true
+function Get-CimInstance {param($ClassName,$ErrorAction) [pscustomobject]@{AutomaticManagedPagefile=$script:auto}}
+function Set-CimInstance {param($Property,$ErrorAction) if($script:apply){$script:auto=$Property.AutomaticManagedPagefile}}
+$null=Invoke-Operation 'Pagefile Auto'
+$script:auto=$false; $script:apply=$false
+$null=Invoke-Operation 'Pagefile Auto'
+''')
+        self.assertEqual([r['Status'] for r in rows], ['RestartRequired','Failed'])
 
     def test_restore_creation_verifies_new_point_and_restores_frequency(self):
         for original, outcome in [('absent','ok'), ('existing','ok'), ('existing','error'), ('absent','missing')]:

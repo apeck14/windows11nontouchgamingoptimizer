@@ -18,6 +18,8 @@ Both presets enable windowed-game optimization for compatible DX10/DX11 games, r
 
 [G] reports current/highest enumerated refresh rates at the current resolution and saved GPU preferences. It never changes resolution or guesses which GPU a game actually uses. Review Windows Graphics/Advanced display settings for per-game exceptions.
 
+Page files are system-managed at every RAM size. Portable/Modern Standby PCs use the AC Best performance preference while preserving their power plan, battery mode and hibernation. Other desktops retain the Ultimate/High Performance path. Sleep timeouts are left unchanged.
+
 ## Results and recovery
 
 Logs and `operation_results_<timestamp>.jsonl` are saved in `logs/`. Results distinguish **Applied**, **AlreadyConfigured**, **Unsupported**, **Failed**, **RestartRequired**, and **Unverified**. Unverified means the command succeeded without an independent state check. Results cover the current session, not changes made afterward by Windows or other software.

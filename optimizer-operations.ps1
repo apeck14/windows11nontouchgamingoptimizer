@@ -210,25 +210,80 @@ function Invoke-MemoryChange {
 
 function Invoke-PagefileChange {
     param([string]$Policy)
+    if ($Policy -ne 'Auto') { throw 'Only system-managed page files are supported.' }
     $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
-    if ($Policy -eq 'Auto') {
-        if ($cs.AutomaticManagedPagefile) { Write-OperationResult AlreadyConfigured 'Page file' 'System-managed.' $true; return }
-        $cs | Set-CimInstance -Property @{AutomaticManagedPagefile=$true} -ErrorAction Stop | Out-Null
-        if (-not (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).AutomaticManagedPagefile) { throw 'Automatic page-file management was not enabled.' }
-    } else {
-        $key = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management'
-        $wanted = $env:SystemDrive + '\pagefile.sys 4096 4096'
-        $current = @(Get-ItemPropertyValue -LiteralPath $key -Name PagingFiles -ErrorAction Stop)
-        if (-not $cs.AutomaticManagedPagefile -and $current.Count -eq 1 -and $current[0] -eq $wanted) { Write-OperationResult AlreadyConfigured 'Page file' 'Fixed 4 GB configured.' $true; return }
-        $cs | Set-CimInstance -Property @{AutomaticManagedPagefile=$false} -ErrorAction Stop | Out-Null
-        Set-ItemProperty -LiteralPath $key -Name PagingFiles -Value @($wanted) -ErrorAction Stop
-        $after = @(Get-ItemPropertyValue -LiteralPath $key -Name PagingFiles -ErrorAction Stop)
-        if ((Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).AutomaticManagedPagefile -or $after.Count -ne 1 -or $after[0] -ne $wanted) { throw 'Fixed page-file configuration did not match.' }
+    if ($cs.AutomaticManagedPagefile) { Write-OperationResult AlreadyConfigured 'Page file' 'System-managed.' $true; return }
+    $cs | Set-CimInstance -Property @{AutomaticManagedPagefile=$true} -ErrorAction Stop | Out-Null
+    if (-not (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).AutomaticManagedPagefile) { throw 'Automatic page-file management was not enabled.' }
+    Write-OperationResult RestartRequired 'Page file' 'System-managed configuration verified; restart to activate.' $true
+}
+
+function Initialize-PowerApi {
+    if ('OptimizerPower' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public static class OptimizerPower {
+    // SYSTEM_POWER_CAPABILITIES layout from the Windows SDK (BOOLEAN is one byte).
+    [StructLayout(LayoutKind.Explicit, Size=76)]
+    public struct Capabilities {
+        [FieldOffset(2)] public byte Lid;
+        [FieldOffset(20)] public byte AoAc;
+        [FieldOffset(30)] public byte Batteries;
+        [FieldOffset(31)] public byte ShortTermBatteries;
     }
-    Write-OperationResult RestartRequired 'Page file' "Saved and verified $Policy configuration; restart to activate." $true
+    [DllImport("powrprof.dll", SetLastError=true)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    static extern bool GetPwrCapabilities(out Capabilities capabilities);
+    [DllImport("powrprof.dll")]
+    static extern uint PowerGetUserConfiguredACPowerMode(out Guid mode);
+    [DllImport("powrprof.dll")]
+    static extern uint PowerSetUserConfiguredACPowerMode(ref Guid mode);
+    public static Capabilities ReadCapabilities() {
+        Capabilities value;
+        if (!GetPwrCapabilities(out value)) throw new Win32Exception(Marshal.GetLastWin32Error());
+        return value;
+    }
+    public static Guid ReadACMode() {
+        Guid value; uint code=PowerGetUserConfiguredACPowerMode(out value);
+        if(code!=0) throw new Win32Exception((int)code);
+        return value;
+    }
+    public static void SetACMode(Guid value) {
+        uint code=PowerSetUserConfiguredACPowerMode(ref value);
+        if(code!=0) throw new Win32Exception((int)code);
+    }
+}
+'@
+}
+
+function Get-PowerCapabilities {
+    Initialize-PowerApi
+    $caps = [OptimizerPower]::ReadCapabilities()
+    @{ModernStandby=($caps.AoAc -ne 0); Portable=($caps.Lid -ne 0 -or ($caps.Batteries -ne 0 -and $caps.ShortTermBatteries -eq 0))}
+}
+
+function Get-ACPowerMode { Initialize-PowerApi; [OptimizerPower]::ReadACMode() }
+function Set-ACPowerMode([guid]$Mode) { Initialize-PowerApi; [OptimizerPower]::SetACMode($Mode) }
+
+function Invoke-HibernationCleanup {
+    $caps = Get-PowerCapabilities
+    if ($caps.Portable -or $caps.ModernStandby) {
+        Write-OperationResult AlreadyConfigured 'Hibernation' 'Preserved on portable/Modern Standby hardware; no change requested.'
+    } else { Invoke-GenericChange @('powercfg','/h','off') }
 }
 
 function Invoke-PerformancePlan {
+    $caps = Get-PowerCapabilities
+    if ($caps.ModernStandby -or $caps.Portable) {
+        $wanted = [guid]'ded574b5-45a0-4f42-8737-46345c09c238'
+        $status = 'AlreadyConfigured'
+        if ((Get-ACPowerMode) -ne $wanted) { Set-ACPowerMode $wanted; $status = 'Applied' }
+        if ((Get-ACPowerMode) -ne $wanted) { throw 'AC power mode read-back did not match Best performance.' }
+        Write-OperationResult $status 'AC power mode' 'Best performance preference verified. Existing power plan and battery mode preserved; Windows/OEM thermal limits still apply.' $true
+        return
+    }
     $template = 'e9a42b02-d5df-448d-aa00-03f14749eb61'
     $result = Invoke-NativeOperation powercfg @('-duplicatescheme',$template)
     $guid = $template
@@ -528,6 +583,7 @@ function Invoke-Operation {
             Memory { Invoke-MemoryChange $tokens[1] ($tokens[2] -eq '1') }
             Pagefile { Invoke-PagefileChange $tokens[1] }
             Plan { Invoke-PerformancePlan }
+            Hibernation { Invoke-HibernationCleanup }
             Restore { New-OptimizerRestorePoint }
             Windowed { Enable-WindowedOptimizations }
             Integrity { Set-MemoryIntegrity ($tokens[1] -eq 'On') }

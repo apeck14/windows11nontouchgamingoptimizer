@@ -407,7 +407,7 @@ if not defined DVR_PREF_SET (
     set "DVR_PREF_SET=1"
 )
 call :Log "Gaming tweaks: power plan"
-echo [*] Enabling Ultimate Performance plan (or High Performance fallback)...
+echo [*] Applying the performance power setting supported by this hardware...
 call :RunOperation Plan Ultimate
 
 echo [*] Tuning Game Mode, GPU scheduling, and visual effects...
@@ -452,10 +452,7 @@ call :Log "Gaming tweaks: scheduler priorities"
 echo [*] Prioritizing multimedia + game scheduler values...
 call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" /v NetworkThrottlingIndex /t REG_DWORD /d 4294967295 /f
 call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" /v SystemResponsiveness /t REG_DWORD /d 10 /f
-call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "GPU Priority" /t REG_DWORD /d 8 /f
-call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "Priority" /t REG_DWORD /d 6 /f
 call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "Scheduling Category" /t REG_SZ /d "High" /f
-call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "SFIO Priority" /t REG_SZ /d "High" /f
 
 call :Log "Gaming tweaks: latency + input"
 
@@ -716,10 +713,6 @@ call :RunOperation Task schtasks /Change /TN "\Microsoft\Windows\Application Exp
 call :RunOperation Task schtasks /Change /TN "\Microsoft\Windows\Maps\MapsUpdateTask" /Disable
 call :RunOperation Task schtasks /Change /TN "\Microsoft\Windows\Maps\MapsToastTask" /Disable
 call :RunOperation Task schtasks /Change /TN "\Microsoft\Windows\CloudExperienceHost\CreateObjectTask" /Disable
-call :RunOperation Native powercfg -attributes SUB_SLEEP 7bc4a2f9-d8fc-4469-b07b-33eb785aaca0 -ATTRIB_HIDE
-call :RunOperation Native powercfg -setacvalueindex SCHEME_CURRENT SUB_SLEEP 7bc4a2f9-d8fc-4469-b07b-33eb785aaca0 0
-call :RunOperation Native powercfg -setdcvalueindex SCHEME_CURRENT SUB_SLEEP 7bc4a2f9-d8fc-4469-b07b-33eb785aaca0 0
-call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power" /v HiberbootEnabled /t REG_DWORD /d 0 /f
 call :RunOperation Feature Disable "Printing-XPSServices-Features"
 call :RunOperation Feature Disable "WorkFolders-Client"
 call :RunOperation Feature Disable "FaxServicesClientPackage"
@@ -737,11 +730,7 @@ echo   %CLR_TITLE%FREEING DISK SPACE%CLR_RESET%
 echo ========================================================================
 echo.
 echo [*] Clearing temporary files and reclaiming disk space...
-call :RunOperation Native powercfg /h off
-call :Log "Hibernation change attempted; see results"
-if "!CHASSIS_TYPE!"=="Laptop" (
-    echo     %CLR_WARNING%[NOTE] Hibernation disable requested - re-enable with: powercfg /h on%CLR_RESET%
-)
+call :RunOperation Hibernation Cleanup
 call :ClearTemp "%TEMP%"
 if defined LOCALAPPDATA call :ClearTemp "%LOCALAPPDATA%\Temp"
 call :ClearTemp "%SystemRoot%\Temp"
@@ -813,32 +802,9 @@ if "%CLEANUP_RESULT%"=="0" (
 exit /b %CLEANUP_RESULT%
 
 :OptimizePageFile
-call :Log "Optimizing page file based on RAM=%RAM_GB%GB"
-echo [*] Configuring page file based on system RAM...
-if not defined RAM_GB (
-    echo [*] RAM not detected, skipping page file optimization
-    call :Log "Page file optimization skipped - RAM not detected"
-    exit /b 0
-)
-if %RAM_GB% GEQ 16 (
-    echo     System RAM: %RAM_GB%GB - Setting managed page file
-    call :RunOperation Pagefile Auto
-    if errorlevel 1 call :Log "Warning: Failed enabling automatic managed page file"
-    call :Log "Requested managed page file; see verified operation result"
-) else if %RAM_GB% GEQ 8 (
-    echo     System RAM: %RAM_GB%GB - Setting fixed page file ^(4GB^)
-    REM Win32_PageFileSetting may not exist when automatic management is enabled; set via CIM + registry for reliability.
-    call :RunOperation Pagefile Fixed4GB
-    if errorlevel 1 call :Log "Warning: Failed setting fixed page file size"
-    call :Log "Requested fixed 4GB page file; see verified operation result"
-) else (
-    echo     System RAM: %RAM_GB%GB - Keeping system-managed page file
-    echo     %CLR_WARNING%[!] Low RAM detected - consider adding more RAM for gaming%CLR_RESET%
-    call :RunOperation Pagefile Auto
-    if errorlevel 1 call :Log "Warning: Failed enabling automatic managed page file (low RAM path)"
-    call :Log "Requested managed page file for low RAM; see verified operation result"
-)
-exit /b 0
+call :Log "Enabling system-managed page file"
+call :RunOperation Pagefile Auto
+exit /b %errorlevel%
 
 :DisableCoreParking
 call :Log "Disabling CPU core parking"
@@ -926,8 +892,6 @@ call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileS
 call :RunOperation Native fsutil behavior set DisableDeleteNotify 0
 
 echo [*] Optimizing process priorities...
-call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\DisplayPostProcessing" /v "GPU Priority" /t REG_DWORD /d 8 /f
-call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\DisplayPostProcessing" /v "Priority" /t REG_DWORD /d 8 /f
 call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\DisplayPostProcessing" /v "Scheduling Category" /t REG_SZ /d "High" /f
 
 call :Log "GPU/storage changes attempted; see results"
@@ -946,14 +910,8 @@ echo   %CLR_TITLE%AUDIO LATENCY REDUCTION%CLR_RESET%
 echo ========================================================================
 echo.
 echo [*] Reducing audio latency for gaming and streaming...
-call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio" /v "GPU Priority" /t REG_DWORD /d 8 /f
-call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio" /v "Priority" /t REG_DWORD /d 6 /f
 call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio" /v "Scheduling Category" /t REG_SZ /d "High" /f
-call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio" /v "SFIO Priority" /t REG_SZ /d "High" /f
-call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio" /v "GPU Priority" /t REG_DWORD /d 8 /f
-call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio" /v "Priority" /t REG_DWORD /d 1 /f
 call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio" /v "Scheduling Category" /t REG_SZ /d "High" /f
-call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio" /v "SFIO Priority" /t REG_SZ /d "High" /f
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\AudioSrv" /v DependOnService /t REG_MULTI_SZ /d "AudioEndpointBuilder\0RpcSs" /f
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Audiosrv" /v Start /t REG_DWORD /d 2 /f
 
@@ -1394,18 +1352,8 @@ set "VERIFY_PASS=0"
 set "VERIFY_FAIL=0"
 
 echo   %CLR_SUBTITLE%Power Plan:%CLR_RESET%
-set "POWER_PLAN_OK=0"
-for /f "tokens=*" %%G in ('powercfg /getactivescheme') do (
-    echo %%G | findstr /I "Ultimate High Performance" >nul && set "POWER_PLAN_OK=1"
-)
-if "%POWER_PLAN_OK%"=="1" (
-    echo     %CLR_SUCCESS%[PASS]%CLR_RESET% High/Ultimate Performance plan active
-    set /a VERIFY_PASS+=1
-) else (
-    echo     %CLR_WARNING%[WARN]%CLR_RESET% Power plan not optimized
-    for /f "tokens=*" %%G in ('powercfg /getactivescheme 2^>nul') do echo     Current: %%G
-    set /a VERIFY_FAIL+=1
-)
+powercfg /getactivescheme
+echo     Portable/Modern Standby PCs retain their plan; see AC power mode in operation results.
 
 echo.
 echo   %CLR_SUBTITLE%Game Mode:%CLR_RESET%
