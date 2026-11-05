@@ -76,13 +76,15 @@ function Get-StorageRoots {
     }
 }
 
-function Measure-StorageRoots($Roots) {
+function Measure-StorageRoots {
+    param($Roots, [switch]$ReviewFolders)
     $roots = @($Roots | Where-Object { $_.Path -and [IO.Path]::IsPathRooted($_.Path) } |
         ForEach-Object { [pscustomobject]@{Category=$_.Category;Path=[IO.Path]::GetFullPath($_.Path).TrimEnd('\')} } |
         Sort-Object Path -Unique)
     foreach ($root in $roots) {
         Write-Host ("Measuring {0}: {1}" -f $root.Category,$root.Path)
         [long]$bytes = 0; $partial = $false
+        $folders = @{}
         $pending = [Collections.Generic.Stack[string]]::new()
         try {
             $directory = Get-Item -LiteralPath $root.Path -Force -ErrorAction Stop
@@ -94,19 +96,36 @@ function Measure-StorageRoots($Roots) {
         } catch { $partial=$true }
         while ($pending.Count) {
             $path = $pending.Pop()
+            $group = if ($ReviewFolders -and $path -ne $root.Path) { $folders[$path.Substring($root.Path.Length).TrimStart('\').Split('\')[0]] } else { $null }
             try {
                 $directory = Get-Item -LiteralPath $path -Force -ErrorAction Stop
-                if ([long]$directory.Attributes -band (0x400 -bor 0x1000 -bor 0x40000 -bor 0x400000)) { $partial=$true; continue }
+                if ([long]$directory.Attributes -band (0x400 -bor 0x1000 -bor 0x40000 -bor 0x400000)) { $partial=$true; if ($group) { $group.Partial=$true }; continue }
+                if ($group) {
+                    if ($directory.CreationTimeUtc -gt $group.Latest) { $group.Latest=$directory.CreationTimeUtc }
+                    if ($directory.LastWriteTimeUtc -gt $group.Latest) { $group.Latest=$directory.LastWriteTimeUtc }
+                }
                 foreach ($item in Get-ChildItem -LiteralPath $path -Force -ErrorAction Stop) {
-                    if ([long]$item.Attributes -band (0x400 -bor 0x1000 -bor 0x40000 -bor 0x400000)) { $partial=$true; continue }
+                    if ([long]$item.Attributes -band (0x400 -bor 0x1000 -bor 0x40000 -bor 0x400000)) { $partial=$true; if ($group) { $group.Partial=$true }; continue }
                     if ($item.PSIsContainer) {
                         # Nested known folders are measured in their own category, once.
-                        if ($item.FullName.TrimEnd('\') -notin $roots.Path) { $pending.Push($item.FullName) }
-                    } else { $bytes += $item.Length }
+                        if ($item.FullName.TrimEnd('\') -notin $roots.Path) {
+                            if ($ReviewFolders -and $path -eq $root.Path) {
+                                $folders[$item.Name]=[pscustomobject]@{Path=$item.FullName;Bytes=0L;Latest=$item.CreationTimeUtc;Partial=$false}
+                            }
+                            $pending.Push($item.FullName)
+                        } elseif ($group) { $group.Partial=$true }
+                    } else {
+                        $bytes += $item.Length
+                        if ($group) {
+                            $group.Bytes += $item.Length
+                            if ($item.CreationTimeUtc -gt $group.Latest) { $group.Latest=$item.CreationTimeUtc }
+                            if ($item.LastWriteTimeUtc -gt $group.Latest) { $group.Latest=$item.LastWriteTimeUtc }
+                        }
+                    }
                 }
-            } catch { $partial=$true }
+            } catch { $partial=$true; if ($group) { $group.Partial=$true } }
         }
-        [pscustomobject]@{Category=$root.Category;Path=$root.Path;Bytes=$bytes;Partial=$partial}
+        [pscustomobject]@{Category=$root.Category;Path=$root.Path;Bytes=$bytes;Partial=$partial;Folders=@($folders.Values)}
     }
 }
 
@@ -116,7 +135,7 @@ function Show-StorageSummary {
         Select-Object @{n='Drive';e={$_.Name}},@{n='Used GB';e={[math]::Round(($_.TotalSize-$_.TotalFreeSpace)/1GB,2)}},
             @{n='Free GB';e={[math]::Round($_.AvailableFreeSpace/1GB,2)}},@{n='Total GB';e={[math]::Round($_.TotalSize/1GB,2)}} |
         Format-Table -AutoSize | Out-String | Write-Host
-    $usage = @(Measure-StorageRoots @(Get-StorageRoots))
+    $usage = @(Measure-StorageRoots @(Get-StorageRoots) -ReviewFolders)
     $usage | Group-Object Category | ForEach-Object {
         [pscustomobject]@{Category=$_.Name; 'Used GB (estimate)'=[math]::Round(($_.Group | Measure-Object Bytes -Sum).Sum/1GB,2);
             Coverage=if ($_.Group.Partial -contains $true) {'Partial'} else {'Scanned'};
@@ -124,6 +143,16 @@ function Show-StorageSummary {
     } | Sort-Object 'Used GB (estimate)' -Descending | Format-Table -AutoSize -Wrap | Out-String -Width 200 | Write-Host
     Write-Host 'Category sizes are file-size estimates, not additive disk totals. Windows, other users, custom app/game libraries and the Recycle Bin are not categorized.'
     Write-Host 'Links, cloud placeholders and inaccessible folders are skipped. For a complete breakdown, open Settings > System > Storage.'
+    $oldFolders=@($usage | ForEach-Object { $_.Folders } | Where-Object {
+        -not $_.Partial -and $_.Bytes -gt 0 -and $_.Latest -lt [datetime]::UtcNow.AddDays(-180)
+    } | Sort-Object Bytes -Descending | Select-Object -First 15)
+    if ($oldFolders.Count) {
+        Write-Host "`nFOLDERS WITH NO RECENT CONTENT CHANGES - largest 15, at scan time"
+        $oldFolders | Select-Object @{n='Size GB';e={'{0:N2}' -f ($_.Bytes/1GB)}},
+            @{n='Days since change';e={[math]::Floor(([datetime]::UtcNow-[datetime]$_.Latest).TotalDays)}},Path |
+            Format-Table -AutoSize -Wrap | Out-String -Width 200 | Write-Host
+        Write-Host 'Based on creation/modification timestamps, not last use. Inspect manually; age alone does not trigger recycling.'
+    }
 }
 
 function Get-CleanupCandidates([string]$Scope) {

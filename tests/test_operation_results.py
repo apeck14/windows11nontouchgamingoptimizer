@@ -1024,6 +1024,68 @@ $rows=@(Measure-StorageRoots @(
 if($rows.Count -ne 2 -or @($rows | Where-Object {-not $_.Partial -or $_.Bytes -ne 0}).Count){throw 'Unavailable data claimed as scanned'}
 ''')
 
+    def test_generic_folder_review_measures_arbitrary_names_and_newest_descendant(self):
+        self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$root=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'documents'
+foreach($name in @('Unknown Game','Windows 10','Recent Content','New Copy')) {
+    $folder=Join-Path $root $name
+    $null=New-Item -ItemType Directory (Join-Path $folder 'nested') -Force
+    [IO.File]::WriteAllBytes((Join-Path $folder 'save.dat'),[byte[]]::new(12))
+    [IO.File]::WriteAllBytes((Join-Path $folder 'nested\data.bin'),[byte[]]::new(8))
+}
+foreach($item in Get-ChildItem $root -Recurse -Force) {
+    $item.CreationTimeUtc=[datetime]::UtcNow.AddDays(-200)
+    $item.LastWriteTimeUtc=[datetime]::UtcNow.AddDays(-200)
+}
+(Get-Item (Join-Path $root 'Recent Content\nested\data.bin')).LastWriteTimeUtc=[datetime]::UtcNow
+(Get-Item (Join-Path $root 'New Copy\save.dat')).CreationTimeUtc=[datetime]::UtcNow
+$result=Measure-StorageRoots @([pscustomobject]@{Category='Documents';Path=$root}) -ReviewFolders
+if($result.Bytes -ne 80 -or $result.Folders.Count -ne 4){throw 'Incorrect folder totals'}
+$old=@($result.Folders | Where-Object Latest -lt ([datetime]::UtcNow.AddDays(-180)))
+if($old.Count -ne 2){throw 'Recent descendants or creation dates were ignored'}
+foreach($folder in $result.Folders) {
+    if($folder.Bytes -ne 20 -or $folder.Partial){throw 'Incorrect content measurement'}
+    if(-not (Test-Path (Join-Path $folder.Path 'save.dat'))){throw 'Review changed content'}
+}
+''')
+
+    def test_generic_folder_review_marks_linked_content_incomplete(self):
+        self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$base=Split-Path $env:OPTIMIZER_RESULTS
+$root=Join-Path $base 'documents'
+$folder=Join-Path $root 'unknown'
+$target=Join-Path $base 'external'
+$null=New-Item -ItemType Directory $folder,$target -Force
+[IO.File]::WriteAllBytes((Join-Path $folder 'local.bin'),[byte[]]::new(3))
+[IO.File]::WriteAllBytes((Join-Path $target 'external.bin'),[byte[]]::new(10))
+$null=New-Item -ItemType Junction -Path (Join-Path $folder 'linked') -Target $target
+$result=Measure-StorageRoots @([pscustomobject]@{Category='Documents';Path=$root}) -ReviewFolders
+if(-not $result.Partial -or -not $result.Folders[0].Partial -or $result.Folders[0].Bytes -ne 3){throw 'Linked contents reported as complete or followed'}
+''')
+
+    def test_generic_folder_report_is_factual_and_excludes_recent_or_partial_folders(self):
+        _, output = self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+function Get-StorageRoots {}
+function Measure-StorageRoots {param($Roots,[switch]$ReviewFolders)
+    if(-not $ReviewFolders){throw 'Folder review requires no second scan'}
+    [pscustomobject]@{Category='Documents';Path='C:\Documents';Bytes=12GB;Partial=$true;Folders=@(
+        [pscustomobject]@{Path='C:\Documents\Arbitrary Folder';Bytes=12GB;Latest=[datetime]::UtcNow.AddDays(-200);Partial=$false},
+        [pscustomobject]@{Path='C:\Documents\Recent';Bytes=20GB;Latest=[datetime]::UtcNow;Partial=$false},
+        [pscustomobject]@{Path='C:\Documents\Incomplete';Bytes=20GB;Latest=[datetime]::UtcNow.AddDays(-300);Partial=$true}
+    )}
+}
+Show-StorageSummary
+''')
+        self.assertIn('12.00', output)
+        self.assertIn('Days since change', output)
+        self.assertIn('Arbitrary Folder', output)
+        self.assertNotIn('C:\\Documents\\Recent', output)
+        self.assertNotIn('C:\\Documents\\Incomplete', output)
+        self.assertIn('age alone does not trigger recycling', output)
+
     def test_storage_summary_shows_gb_categories_and_investigation_paths(self):
         _, output = self.run_case(r'''
 . (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
