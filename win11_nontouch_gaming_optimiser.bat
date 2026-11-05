@@ -137,7 +137,7 @@ echo ========================================================================
 echo.
 call :WarnIfOnBattery
 if errorlevel 1 exit /b 1
-call :CreateRestorePoint
+call :PrepareOptimization
 if errorlevel 1 exit /b 1
 echo.
 echo [*] Step 1/15: Removing consumer apps...
@@ -192,7 +192,7 @@ echo ========================================================================
 echo.
 call :WarnIfOnBattery
 if errorlevel 1 exit /b 1
-call :CreateRestorePoint
+call :PrepareOptimization
 if errorlevel 1 exit /b 1
 echo.
 echo [*] Step 1/7: Removing consumer apps...
@@ -217,6 +217,19 @@ call :Log "Recommended optimization sequence completed"
 call :ShowChangesSummary
 exit /b 0
 
+:PrepareOptimization
+call :CreateRestorePoint
+if not errorlevel 1 exit /b 0
+echo.
+echo [!] A new restore point is unavailable. You can still apply the tweaks.
+choice /c YN /n /d N /t 30 /m "Continue without a new restore point? (Y/N, default=N): "
+if not "%errorlevel%"=="1" (
+    call :Log "Optimization cancelled after restore point failure"
+    exit /b 1
+)
+call :Log "User chose to optimize without a new restore point"
+exit /b 0
+
 :CreateRestorePoint
 call :Log "Creating system restore point"
 echo.
@@ -233,7 +246,7 @@ if errorlevel 1 (
     echo [!] Restore point was not created. No optimizations applied.
     echo     Enable System Protection and check the log for the exact error.
     echo     Windows may also limit creation if a recent restore point exists.
-    call :Log "Restore point creation failed; sequence cancelled"
+    call :Log "Restore point creation failed"
     exit /b 1
 )
 echo %CLR_SUCCESS%[+] Restore point created successfully.%CLR_RESET%
@@ -720,7 +733,7 @@ if "!CHASSIS_TYPE!"=="Laptop" (
 call :ClearTemp "%TEMP%"
 if defined LOCALAPPDATA call :ClearTemp "%LOCALAPPDATA%\Temp"
 call :ClearTemp "%SystemRoot%\Temp"
-REM Leave Windows Update cache and service state to Windows maintenance.
+call :ClearUpdateCache
 "%SystemRoot%\System32\dism.exe" /Online /Cleanup-Image /StartComponentCleanup >> "%LOG_FILE%" 2>&1
 call :Log "Disk cleanup complete"
 call :AddToSummary "Disk space freed"
@@ -749,27 +762,41 @@ exit /b 0
 
 :ClearTemp
 setlocal
+set "OPTIMIZER_CLEANUP_MODE=temp"
 set "OPTIMIZER_CLEANUP_TARGET=%~1"
-if not defined OPTIMIZER_CLEANUP_TARGET (
-    endlocal
-    exit /b 0
-)
-call :Log "Clearing temporary files in %OPTIMIZER_CLEANUP_TARGET%"
-REM Allow only standard temp directories. Skip junctions/symlinks, including ancestors.
-REM Do not use Remove-Item -Recurse: walk validated directories explicitly.
+call :ClearDirectory
+endlocal & exit /b %errorlevel%
+
+:ClearUpdateCache
+setlocal
+set "OPTIMIZER_CLEANUP_MODE=update"
+set "OPTIMIZER_CLEANUP_TARGET=%SystemRoot%\SoftwareDistribution\Download"
+call :ClearDirectory
+endlocal & exit /b %errorlevel%
+
+:ClearDirectory
+if not defined OPTIMIZER_CLEANUP_TARGET exit /b 0
+call :Log "Clearing %OPTIMIZER_CLEANUP_TARGET%"
+REM Accept configured temp paths but reject roots, profile/system folders and ancestors.
+REM Skip reparse points and never recursively follow a junction or symlink.
+REM Update-cache cleanup waits for both services to stop and restores running services.
 "%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command ^
- "$ErrorActionPreference='Stop'; try {" ^
- "$target=[IO.Path]::GetFullPath($env:OPTIMIZER_CLEANUP_TARGET).TrimEnd('\');" ^
- "$allowed=@(); if($env:LOCALAPPDATA){$allowed += [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Temp')).TrimEnd('\')}; if($env:SystemRoot){$allowed += [IO.Path]::GetFullPath((Join-Path $env:SystemRoot 'Temp')).TrimEnd('\')};" ^
- "if($target -notin $allowed){throw 'Refusing nonstandard temp directory'};" ^
- "if(-not (Test-Path -LiteralPath $target)){exit 0};" ^
- "$dir=Get-Item -LiteralPath $target -Force; if(-not $dir.PSIsContainer){throw 'Target is not a directory'};" ^
- "for($ancestor=$dir; $null -ne $ancestor; $ancestor=$ancestor.Parent){if($ancestor.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Refusing reparse point in temp path'}};" ^
- "function Clear-TempDirectory([string]$path){foreach($item in Get-ChildItem -LiteralPath $path -Force){if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){continue}; if($item.PSIsContainer){Clear-TempDirectory $item.FullName; if(@(Get-ChildItem -LiteralPath $item.FullName -Force).Count -ne 0){continue}}; try {Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop} catch {Write-Warning $_}}};" ^
- "Clear-TempDirectory $target; exit 0 } catch {Write-Warning $_; exit 1}" >> "%LOG_FILE%" 2>&1
+ "$ErrorActionPreference='Stop'; $restart=@(); try { try {" ^
+ "function Full-Path([string]$path){if(-not [IO.Path]::IsPathRooted($path)){throw 'Cleanup path must be absolute'}; [IO.Path]::GetFullPath($path).TrimEnd('\')};" ^
+ "$target=Full-Path $env:OPTIMIZER_CLEANUP_TARGET; $cache=Full-Path (Join-Path $env:SystemRoot 'SoftwareDistribution\Download');" ^
+ "$allowed=@(); if($env:OPTIMIZER_CLEANUP_MODE -eq 'update'){$allowed=@($cache)} elseif($env:OPTIMIZER_CLEANUP_MODE -eq 'temp'){if($env:LOCALAPPDATA){$allowed += Full-Path (Join-Path $env:LOCALAPPDATA 'Temp')}; $allowed += Full-Path (Join-Path $env:SystemRoot 'Temp'); if($env:TEMP){$allowed += Full-Path $env:TEMP}} else {throw 'Unknown cleanup mode'};" ^
+ "if($target -notin $allowed){throw 'Refusing unapproved cleanup directory'}; if($target -eq [IO.Path]::GetPathRoot($target).TrimEnd('\')){throw 'Refusing drive root'};" ^
+ "$protected=@($env:USERPROFILE,$env:PUBLIC,$env:LOCALAPPDATA,$env:APPDATA,$env:ProgramData,$env:SystemRoot,$env:ProgramFiles,${env:ProgramFiles(x86)}); foreach($path in $protected){if($path){$full=Full-Path $path; if($full -eq $target -or $full.StartsWith($target+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Refusing protected directory or ancestor'}}};" ^
+ "if($env:OPTIMIZER_CLEANUP_MODE -eq 'temp' -and $target -eq $cache){throw 'Update cache requires service coordination'};" ^
+ "if($env:OPTIMIZER_CLEANUP_MODE -eq 'temp' -and $target -ne (Full-Path (Join-Path $env:SystemRoot 'Temp'))){foreach($tree in @($env:SystemRoot,$env:ProgramFiles,${env:ProgramFiles(x86)})){if($tree -and $target.StartsWith((Full-Path $tree)+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Refusing cleanup inside system or application directory'}}};" ^
+ "if(-not (Test-Path -LiteralPath $target)){exit 0}; $dir=Get-Item -LiteralPath $target -Force; if(-not $dir.PSIsContainer){throw 'Target is not a directory'};" ^
+ "for($ancestor=$dir; $null -ne $ancestor; $ancestor=$ancestor.Parent){if($ancestor.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Refusing reparse point in cleanup path'}};" ^
+ "if($env:OPTIMIZER_CLEANUP_MODE -eq 'update'){$services=@(Get-Service -Name wuauserv,bits); if($services.Count -ne 2){throw 'Update services not found'}; foreach($svc in $services){if($svc.Status -notin @('Running','Stopped')){throw 'Update service is changing state; retry later'}}; $restart=@($services | Where-Object {$_.Status -eq 'Running'}); foreach($svc in $restart){Stop-Service -InputObject $svc -NoWait -ErrorAction Stop; $svc.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(20))}; foreach($svc in $services){$svc.Refresh(); if($svc.Status -ne 'Stopped'){throw 'Update service has not stopped'}}};" ^
+ "function Clear-TempDirectory([string]$path){foreach($item in Get-ChildItem -LiteralPath $path -Force){if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){continue}; if($item.PSIsContainer){Clear-TempDirectory $item.FullName; if(@(Get-ChildItem -LiteralPath $item.FullName -Force).Count -ne 0){continue}}; try {Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop} catch {Write-Warning $_}}}; Clear-TempDirectory $target" ^
+ "} finally {$restoreFailed=$false; foreach($svc in $restart){try {Start-Service -InputObject $svc -ErrorAction Stop} catch {$restoreFailed=$true; Write-Warning $_}}; if($restoreFailed){throw 'Could not restore an update service; inspect the log'}}; exit 0 } catch {Write-Warning $_; exit 1}" >> "%LOG_FILE%" 2>&1
 set "CLEANUP_RESULT=%errorlevel%"
-if not "%CLEANUP_RESULT%"=="0" call :Log "Temp cleanup skipped or incomplete; see log"
-endlocal & exit /b %CLEANUP_RESULT%
+if not "%CLEANUP_RESULT%"=="0" call :Log "Cleanup skipped or incomplete; see log"
+exit /b %CLEANUP_RESULT%
 
 :OptimizePageFile
 call :Log "Optimizing page file based on RAM=%RAM_GB%GB"
@@ -990,7 +1017,7 @@ echo   - Reducing background CPU/RAM usage
 echo   - Changes are logged; undo is partial and cannot recover deleted files
 echo.
 echo   %CLR_SUBTITLE%QUICK START (RECOMMENDED):%CLR_RESET%
-echo   1. Enable System Protection
+echo   1. Enable System Protection if you want automatic restore points
 echo   2. Select [2] for "Recommended" optimization; it creates a restore point
 echo   3. Restart your PC
 echo.
@@ -1022,7 +1049,7 @@ echo   Bloat: Removed Bing apps, Xbox TCUI, Teams, Spotify, TikTok, etc.
 echo   Visual: Transparency off, animations disabled
 echo.
 echo   %CLR_SUBTITLE%SAFETY FEATURES:%CLR_RESET%
-echo   - Restore point required for Full and Recommended; manual for individual actions
+echo   - Full and Recommended attempt a restore point; you can explicitly continue if it fails
 echo   - Comprehensive logging to logs\ folder
 echo   - Undo function attempts a partial rollback only
 echo   - Xbox Game Bar preserved by default (option to disable)

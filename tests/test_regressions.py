@@ -1,7 +1,7 @@
 """Non-admin regression tests. Never execute the optimizer's startup or real tweaks.
 
-Extracted control-flow routines use explicit stubs. Only ClearTemp runs its real
-PowerShell, against fixtures under a disposable directory beside the repository.
+Extracted control-flow routines use explicit stubs. Cleanup runs real file
+operations only in a disposable directory; all service operations are mocked.
 """
 import json
 import os
@@ -99,11 +99,11 @@ class Regressions(unittest.TestCase):
                 self.assertEqual('created successfully' in result.stdout,
                                  service_code == checkpoint_code == 0)
 
-    def test_sequences_stop_before_mutations_on_battery_or_restore_failure(self):
+    def test_sequences_stop_before_mutations_on_battery_or_cancelled_preparation(self):
         for name in ['FullOptimization', 'RunRecommended']:
             body = routine(name)
             calls = set(re.findall(r'call :(\w+)', body)) - {'Log'}
-            for failure in ['WarnIfOnBattery', 'CreateRestorePoint', None]:
+            for failure in ['WarnIfOnBattery', 'PrepareOptimization', None]:
                 with self.subTest(routine=name, failure=failure):
                     extra = LOG + ''.join(stub(n, int(n == failure)) for n in calls)
                     result, trace, _ = self.run_batch(body, name, extra=extra)
@@ -117,6 +117,16 @@ class Regressions(unittest.TestCase):
                         self.assertEqual(result.returncode, 0)
                         self.assertIn('ApplyGamingTweaks', events)
                         self.assertIn('ShowChangesSummary', events)
+
+    def test_restore_failure_requires_explicit_continue(self):
+        body = mock_commands(routine('PrepareOptimization'))
+        for restore_code, choice, expected in [(0, '2', 0), (1, '1', 0), (1, '2', 1),
+                                                (1, '255', 1)]:
+            with self.subTest(restore=restore_code, choice=choice):
+                result, _, _ = self.run_batch(body, 'PrepareOptimization',
+                    extra=LOG + CHOOSE + stub('CreateRestorePoint', restore_code),
+                    env={'CHOICE_CODE': choice})
+                self.assertEqual(result.returncode, expected)
 
     def test_dvr_choice_uses_fresh_exit_code(self):
         body = routine('ApplyGamingTweaks').split('call :Log "Gaming tweaks: power plan"')[0]
@@ -199,9 +209,12 @@ exit /b %CHOICE_CODE%
         self.assertEqual(result.returncode, 0)
         self.assertIn(r'\Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser', trace)
 
-    def cleanup(self, target, localapp):
-        return self.run_batch(routine('ClearTemp'), 'ClearTemp', extra=LOG,
-                              args=f'"{target}"', env={'LOCALAPPDATA': str(localapp)})
+    def cleanup(self, target, localapp, temp=None):
+        env = {'LOCALAPPDATA': str(localapp)}
+        if temp is not None:
+            env['TEMP'] = str(temp)
+        return self.run_batch(routine('ClearTemp') + routine('ClearDirectory'),
+                              'ClearTemp', extra=LOG, args=f'"{target}"', env=env)
 
     def test_cleanup_removes_only_approved_contents(self):
         app = self.work / 'local app'
@@ -226,8 +239,117 @@ exit /b %CHOICE_CODE%
         for target in [app, self.work.anchor]:
             result, _, log = self.cleanup(target, app)
             self.assertEqual(result.returncode, 1, log)
-            self.assertIn('Refusing nonstandard', log)
+            self.assertIn('Refusing unapproved', log)
             self.assertEqual(sentinel.read_text(), 'keep')
+
+    def test_custom_temp_is_cleaned_but_protected_overrides_are_refused(self):
+        app = self.work / 'profile' / 'local'
+        custom = self.work / 'custom scratch'
+        custom.mkdir()
+        (custom / 'discard.tmp').write_text('temporary')
+        result, _, log = self.cleanup(custom, app, temp=custom)
+        self.assertEqual(result.returncode, 0, log)
+        self.assertEqual(list(custom.iterdir()), [])
+        app.mkdir(parents=True)
+        sentinel = app / 'keep.txt'
+        sentinel.write_text('keep')
+        for forbidden in [self.work.anchor, app, app.parent]:
+            result, _, log = self.cleanup(forbidden, app, temp=forbidden)
+            self.assertEqual(result.returncode, 1, log)
+            self.assertIn('Refusing', log)
+            self.assertEqual(sentinel.read_text(), 'keep')
+
+    def test_update_cache_service_lifecycle(self):
+        # Execute the real embedded cleanup code with only service operations
+        # mocked. All file targets are in this test's validated sandbox.
+        body = routine('ClearDirectory').replace('^\n', '')
+        command = re.search(r'-Command\s+((?:"[^"\n]*"\s*)+)', body).group(1)
+        script = ' '.join(re.findall(r'"([^"]*)"', command))
+        windows = self.work / 'Windows'
+        target = windows / 'SoftwareDistribution' / 'Download'
+        target.mkdir(parents=True)
+        trace = self.work / 'services.txt'
+        settings_file = self.work / 'settings.json'
+        fixture = self.work / 'cache-test.ps1'
+        preamble = r'''
+$config = Get-Content -Raw -LiteralPath $env:TEST_SETTINGS | ConvertFrom-Json
+$env:SystemRoot = $config.windows
+$env:OPTIMIZER_CLEANUP_MODE = 'update'
+$env:OPTIMIZER_CLEANUP_TARGET = $config.target
+$script:services = @()
+foreach($name in @('wuauserv','bits')) {
+    $status = if($name -eq 'bits'){$config.bitsStatus}else{'Running'}
+    $svc = [pscustomobject]@{Name=$name; Status=$status}
+    $svc | Add-Member ScriptMethod WaitForStatus {param($desired,$timeout) $this.Status=$desired}
+    $svc | Add-Member ScriptMethod Refresh {}
+    $script:services += $svc
+}
+function Get-Service {param($Name) $script:services}
+function Stop-Service {
+    param($InputObject,[switch]$NoWait,$ErrorAction)
+    Add-Content -LiteralPath $config.trace -Value ('stop:'+$InputObject.Name)
+    if($config.stopFailure -and $InputObject.Name -eq 'bits'){throw 'Mock stop failure'}
+    $InputObject.Status='Stopped'
+}
+function Start-Service {
+    param($InputObject,$ErrorAction)
+    Add-Content -LiteralPath $config.trace -Value ('start:'+$InputObject.Name)
+    $InputObject.Status='Running'
+}
+function Get-ChildItem {
+    param($LiteralPath,[switch]$Force)
+    if($config.cleanupFailure){throw 'Mock cleanup failure'}
+    Microsoft.PowerShell.Management\Get-ChildItem -LiteralPath $LiteralPath -Force:$Force
+}
+'''
+        fixture.write_text(preamble + script, encoding='utf-8')
+        for bits_status, stop_failure, cleanup_failure in [('Running', False, False),
+                ('Stopped', False, False), ('Running', True, False), ('Running', False, True),
+                ('StopPending', False, False)]:
+            with self.subTest(bits=bits_status, stop=stop_failure, cleanup=cleanup_failure):
+                sentinel = target / 'download.tmp'
+                sentinel.write_text('download')
+                trace.write_text('')
+                settings_file.write_text(json.dumps(dict(windows=str(windows), target=str(target),
+                    trace=str(trace), bitsStatus=bits_status, stopFailure=stop_failure,
+                    cleanupFailure=cleanup_failure)))
+                env = os.environ.copy()
+                env['TEST_SETTINGS'] = str(settings_file)
+                result = subprocess.run([POWERSHELL, '-NoProfile', '-File', str(fixture)],
+                    env=env, capture_output=True, text=True, timeout=25)
+                events = trace.read_text().splitlines()
+                failed = stop_failure or cleanup_failure or bits_status == 'StopPending'
+                self.assertEqual(result.returncode, int(failed), result.stdout + result.stderr)
+                self.assertEqual(sentinel.exists(), failed)
+                if bits_status == 'StopPending':
+                    self.assertEqual(events, [])
+                elif bits_status == 'Stopped':
+                    self.assertEqual(events, ['stop:wuauserv', 'start:wuauserv'])
+                else:
+                    self.assertEqual(events, ['stop:wuauserv', 'stop:bits',
+                                              'start:wuauserv', 'start:bits'])
+
+    def test_custom_temp_cannot_target_installed_applications(self):
+        programs = self.work / 'Program Files'
+        target = programs / 'Application'
+        target.mkdir(parents=True)
+        sentinel = target / 'keep.exe'
+        sentinel.write_text('keep')
+        body = routine('ClearDirectory').replace('^\n', '')
+        command = re.search(r'-Command\s+((?:"[^"\n]*"\s*)+)', body).group(1)
+        script = ' '.join(re.findall(r'"([^"]*)"', command))
+        # PowerShell resets ProgramFiles on launch; override it after startup.
+        fixture = self.work / 'protected-test.ps1'
+        fixture.write_text("$env:ProgramFiles=$env:TEST_PROGRAMS; "
+            "$env:TEMP=$env:TEST_TARGET; $env:OPTIMIZER_CLEANUP_MODE='temp'; "
+            "$env:OPTIMIZER_CLEANUP_TARGET=$env:TEST_TARGET; " + script)
+        env = os.environ.copy()
+        env.update(TEST_PROGRAMS=str(programs), TEST_TARGET=str(target))
+        result = subprocess.run([POWERSHELL, '-NoProfile', '-File', str(fixture)],
+                                env=env, capture_output=True, text=True, timeout=25)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('Refusing cleanup inside system or application', result.stdout)
+        self.assertEqual(sentinel.read_text(), 'keep')
 
     def test_cleanup_skips_junctions_and_rejects_linked_ancestors(self):
         app = self.work / 'local'
@@ -257,7 +379,7 @@ exit /b %CHOICE_CODE%
     def test_embedded_powershell_parses(self):
         # Remove batch continuation/pipe escaping, then parse, never invoke.
         joined = SOURCE.replace('^\n', '').replace('^|', '|')
-        commands = re.findall(r'-Command ((?:"[^"\n]*"\s*)+)', joined)
+        commands = re.findall(r'-Command\s+((?:"[^"\n]*"\s*)+)', joined)
         scripts = [' '.join(re.findall(r'"([^"]*)"', command)) for command in commands]
         self.assertGreater(len(scripts), 15)
         script_file = self.work / 'scripts.json'

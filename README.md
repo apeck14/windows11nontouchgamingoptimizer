@@ -12,13 +12,23 @@ A comprehensive, menu-driven batch script to optimize Windows 11 for maximum gam
 
 This fork repairs restore-point control flow, stale prompt exit codes, laptop cancellation, quoted task names, power-plan GUID parsing, the page-file path, and a malformed gaming-menu banner. Safe and aggressive network modes are both reachable. Battery confirmation happens before Full/Recommended changes. Boot-setting failures do not suggest disabling Secure Boot.
 
-Full and Recommended abort if creating a restore point fails or produces a warning (including Windows' recent-restore-point limit). Individual actions still require you to create a restore point yourself. These routines have been regression-tested with mocked system commands, not applied to a live Windows installation.
+Full and Recommended attempt to create a restore point. If creation fails or hits Windows' recent-restore-point limit, you can explicitly choose to continue; the default is to cancel. Individual actions do not create restore points automatically. These routines have been regression-tested with mocked system commands, not applied to a live Windows installation.
 
-Temporary-file cleanup accepts only `%LOCALAPPDATA%\Temp` and `%SystemRoot%\Temp`, skips reparse points (junctions/symlinks), and leaves Windows Update's cache and services alone. Custom `%TEMP%` locations are skipped. Existing Optimize Drives schedules are preserved, including SSD maintenance; core parking uses the active power setting without rewriting its allowed range.
+Temporary-file cleanup accepts `%LOCALAPPDATA%\Temp`, `%SystemRoot%\Temp`, and the configured `%TEMP%`, including custom locations. It rejects drive roots, protected profile/system folders and their ancestors, and skips reparse points (junctions/symlinks). Windows Update download-cache cleanup is retained: it waits for BITS and Windows Update to stop, skips cleanup if they cannot stop, and attempts to restore only services that were originally running, even after a cleanup error. It does not change their startup types. Existing Optimize Drives schedules are preserved, including SSD maintenance; core parking uses the active power setting without rewriting its allowed range.
 
 **Undo is a partial reset to chosen defaults, not restoration of your original configuration.** It requires confirmation and never enables Remote Registry or Routing and Remote Access. Registry exports cover selected keys only. Removed apps, deleted files, GPU settings, power settings, page-file settings, and other changes are not fully recovered by Undo. Keep an independent backup; System Restore is not a file backup.
 
 Run the non-administrative regression tests with `python tests/test_regressions.py`. They execute extracted batch routines with system changes stubbed out and test cleanup only inside a temporary test directory.
+
+### Performance scope
+
+The fork retains the original debloat list, touch/pen removal, gaming and GPU settings, service/telemetry changes, audio settings, memory/page-file tuning, and aggressive TCP option. Full mode still uses aggressive network tuning; Recommended still uses the safe option. Repairs make those operations reachable and preserve user choices; they are not FPS benchmarks.
+
+Two removed settings remain intentionally removed:
+- Rewriting core-parking `ValueMin`/`ValueMax` to zero is unnecessary: the retained [`CPMINCORES=100` disables core parking](https://learn.microsoft.com/en-us/windows-hardware/customize/power-settings/options-for-core-parking-cpmincores).
+- Disabling scheduled Optimize Drives also disables useful SSD maintenance. [Windows optimizes SSDs using trim](https://support.microsoft.com/en-au/windows/experience/storage-filemanagement/defragment-optimize-your-data-drives-in-windows); the fork preserves your existing schedule.
+
+Windows Update cache removal reclaims disk space, but updates may download those files again. [Microsoft documents this procedure for update troubleshooting](https://learn.microsoft.com/en-us/troubleshoot/windows-client/installing-updates-features-roles/troubleshoot-windows-update-error-0x80070570). It is not evidence of an FPS improvement. Actual FPS, frame-time and latency changes depend on hardware and workload and need before/after measurements.
 
 ## 🎮 Features
 
@@ -39,7 +49,7 @@ Run the non-administrative regression tests with `python tests/test_regressions.
 - **Optional Xbox Service Disable** - For users who don't use Game Bar or Xbox features (requires confirmation)
 
 ### **Safety & Convenience**
-- **System Restore Point** - Restore point required before Full/Recommended changes
+- **System Restore Point** - Automatic attempt before Full/Recommended, with explicit continue-or-cancel on failure
 - **Comprehensive Logging** - All actions timestamped and logged for audit trail
 - **Registry Backup** - Exports of selected registry keys; not a full backup
 - **Laptop Detection** - Warns laptop users about battery impact, offers opt-out
@@ -171,7 +181,7 @@ Consumer apps: Bing News/Weather/Finance, Clipchamp, GetHelp, Office Hub, Solita
 ## 🛡️ Safety Features
 
 ### **System Restore Point**
-Full and Recommended require successful restore-point creation before optimization; individual actions do not create one automatically. If System Protection is not enabled:
+Full and Recommended attempt restore-point creation before optimization; on failure they offer to continue without a new point. Individual actions do not create one automatically. If System Protection is not enabled:
 1. Open Control Panel → System → System Protection
 2. Select C: drive → Configure
 3. Enable "Turn on system protection"
@@ -339,7 +349,7 @@ The verification tool shows **[PASS]** or **[WARN]** for each check and displays
 ### **"Restore point creation failed"**
 - Enable System Protection (see Safety Features section)
 - Verify **Volume Shadow Copy** and **Microsoft Software Shadow Copy Provider** services are set to Manual and running
-- Full/Recommended stop if a restore point cannot be created; inspect the log before retrying
+- Full/Recommended offer to continue without a new restore point if creation fails; inspect the log for the reason
 
 ### **Laptop battery warning / power concerns**
 - The script detects laptop chassis types and warns before applying aggressive tweaks
