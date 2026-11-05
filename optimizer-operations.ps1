@@ -439,10 +439,6 @@ function Show-GraphicsConfiguration {
 function Get-NativeDesiredState {
     param([string[]]$Tokens)
     $exe = [IO.Path]::GetFileNameWithoutExtension($Tokens[0]).ToLowerInvariant()
-    if ($exe -eq 'powercfg' -and $Tokens[1] -eq '/h') {
-        $state = Get-ItemPropertyValue 'HKLM:\SYSTEM\CurrentControlSet\Control\Power' -Name HibernateEnabled -ErrorAction Stop
-        return ([bool]$state -eq ($Tokens[2] -eq 'on'))
-    }
     if ($exe -eq 'netsh' -and $Tokens.Count -eq 6 -and ($Tokens[1..4] -join ' ') -eq 'interface tcp set global') {
         $pair = $Tokens[5] -split '=',2
         if ($pair[0] -eq 'autotuninglevel') {
@@ -455,23 +451,22 @@ function Get-NativeDesiredState {
             return [string]$value.($names[$pair[0]]) -ieq $pair[1]
         }
     }
-    if ($exe -eq 'powercfg' -and $Tokens[1] -in @('-setacvalueindex','-setdcvalueindex')) {
+    if ($exe -eq 'powercfg' -and $Tokens[1] -eq '-setacvalueindex') {
         $scheme = $Tokens[2]
         if ($scheme -eq 'SCHEME_CURRENT') {
             $query = Invoke-NativeOperation powercfg @('/getactivescheme')
             if ($query.Code -ne 0 -or $query.Output -notmatch '[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}') { return $null }
             $scheme = $Matches[0]
         }
-        $aliases = @{SUB_PROCESSOR='54533251-82be-4824-96c1-47b60b740d00';SUB_SLEEP='238c9fa8-0aad-41ed-83f4-97be242c8f20';CPMINCORES='0cc5b647-c1df-4637-891a-dec35c318583'}
+        $aliases = @{SUB_PROCESSOR='54533251-82be-4824-96c1-47b60b740d00';CPMINCORES='0cc5b647-c1df-4637-891a-dec35c318583'}
         $group = $Tokens[3]; $setting = $Tokens[4]
         if ($aliases.ContainsKey($group)) { $group=$aliases[$group] }
         if ($aliases.ContainsKey($setting)) { $setting=$aliases[$setting] }
-        $property = if ($Tokens[1] -eq '-setacvalueindex') {'ACSettingIndex'} else {'DCSettingIndex'}
         $key = "HKLM:\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes\$scheme\$group\$setting"
         if (-not (Test-Path -LiteralPath $key)) { return $false }
         $state = Get-ItemProperty -LiteralPath $key -ErrorAction Stop
-        if (-not $state.PSObject.Properties[$property]) { return $false }
-        return $state.$property -eq [uint32]$Tokens[5]
+        if (-not $state.PSObject.Properties['ACSettingIndex']) { return $false }
+        return $state.ACSettingIndex -eq [uint32]$Tokens[5]
     }
     if ($exe -eq 'fsutil' -and $Tokens[1] -eq 'behavior' -and $Tokens[2] -eq 'set') {
         $query = Invoke-NativeOperation fsutil @('behavior','query',$Tokens[3])
@@ -482,18 +477,10 @@ function Get-NativeDesiredState {
         $desired = if ($Tokens[2] -eq 'SCHEME_MIN') {'8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c'} else {$Tokens[2]}
         if ($desired -match '^[a-f\d-]{36}$' -and $query.Code -eq 0) { return $query.Output -match [regex]::Escape($desired) }
     }
-    if ($exe -eq 'bcdedit' -and $Tokens[1] -in @('/set','/deletevalue')) {
+    if ($exe -eq 'bcdedit' -and $Tokens[1] -eq '/deletevalue') {
         $query = Invoke-NativeOperation bcdedit @('/enum','{current}')
         if ($query.Code -eq 0) {
-            $pattern = '(?im)^\s*' + [regex]::Escape($Tokens[2]) + '\s+(\S+)'
-            if ($Tokens[1] -eq '/deletevalue') { return -not ($query.Output -match $pattern) }
-            if ($query.Output -match $pattern) {
-                $actual = $Matches[1].ToLowerInvariant(); $desired = $Tokens[3].ToLowerInvariant()
-                if ($actual -in @('yes','true') -and $desired -in @('yes','true')) { return $true }
-                if ($actual -in @('no','false') -and $desired -in @('no','false')) { return $true }
-                return $actual -eq $desired
-            }
-            return $false
+            return -not ($query.Output -match ('(?im)^\s*' + [regex]::Escape($Tokens[2]) + '\s+'))
         }
     }
     # A missing checker is unknown, never an implied match.
@@ -506,7 +493,7 @@ function Invoke-GenericChange {
     $before = Get-NativeDesiredState $Tokens
     if ($before -eq $true) { Write-OperationResult AlreadyConfigured ($Tokens -join ' ') 'Requested state verified.' $true; return }
     $result = Invoke-NativeOperation $Tokens[0] $Tokens[1..($Tokens.Count-1)]
-    if ($result.Code -eq 3010 -or $result.Output -match '0x800f0806') { Write-OperationResult RestartRequired ($Tokens -join ' ') 'Restart required; operation may be deferred.'; return }
+    if ($result.Code -eq 3010) { Write-OperationResult RestartRequired ($Tokens -join ' ') 'Restart required; operation may be deferred.'; return }
     if ($result.Code -ne 0) { throw "Exit $($result.Code): $($result.Output.Trim())" }
     $after = Get-NativeDesiredState $Tokens
     if ($after -eq $false) { throw 'Command succeeded but read-back does not match.' }
