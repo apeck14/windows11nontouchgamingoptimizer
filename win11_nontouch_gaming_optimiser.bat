@@ -50,7 +50,7 @@ if "%ADMIN_STATUS%"=="2" exit /b 0
 if not "%ADMIN_STATUS%"=="0" exit /b %ADMIN_STATUS%
 call :CheckAdmin || exit /b 1
 
-for /f %%I in ('"%POWERSHELL%" -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "STAMP=%%I"
+for /f %%I in ('%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "STAMP=%%I"
 set "LOG_DIR=%SCRIPT_DIR%logs"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>&1
 set "LOG_FILE=%LOG_DIR%\nontouch_gaming_optimizer_%STAMP%.log"
@@ -1101,13 +1101,13 @@ echo   Log file: %LOG_FILE%
 echo.
 echo   %CLR_SUBTITLE%System Information:%CLR_RESET%
 set "TOTAL_RAM="
-for /f "usebackq tokens=* delims=" %%I in (`"%POWERSHELL%" -NoProfile -Command "try { [int]([Math]::Round(((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1GB),0)) } catch { '' }"`) do set "TOTAL_RAM=%%I"
+for /f "usebackq tokens=* delims=" %%I in (`%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -Command "try { [int]([Math]::Round(((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1GB),0)) } catch { '' }"`) do set "TOTAL_RAM=%%I"
 if defined TOTAL_RAM echo   - RAM: !TOTAL_RAM! GB
 set "CPU_INFO="
-for /f "usebackq tokens=* delims=" %%I in (`"%POWERSHELL%" -NoProfile -Command "try { (Get-CimInstance Win32_Processor | Select-Object -First 1).Name.Trim() } catch { '' }"`) do set "CPU_INFO=%%I"
+for /f "usebackq tokens=* delims=" %%I in (`%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -Command "try { (Get-CimInstance Win32_Processor | Select-Object -First 1).Name.Trim() } catch { '' }"`) do set "CPU_INFO=%%I"
 if defined CPU_INFO echo   - CPU: !CPU_INFO!
 set "GPU_INFO="
-for /f "usebackq tokens=* delims=" %%I in (`"%POWERSHELL%" -NoProfile -Command "try { $gpus = Get-CimInstance Win32_VideoController ^| Where-Object { $_.Name -and $_.Name -notmatch 'Vivi^|Microsoft Basic^|Remote Desktop^|Virtual^|Parsec^|VMware^|Hyper-V' }; $discrete = $gpus ^| Where-Object { $_.Name -match 'NVIDIA^|AMD^|Radeon^|GeForce^|RTX^|GTX' } ^| Select-Object -First 1; if ($discrete) { $discrete.Name.Trim() } elseif ($gpus) { ($gpus ^| Select-Object -First 1).Name.Trim() } else { '' } } catch { '' }"`) do set "GPU_INFO=%%I"
+for /f "usebackq tokens=* delims=" %%I in (`%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -Command "try { $gpus = Get-CimInstance Win32_VideoController ^| Where-Object { $_.Name -and $_.Name -notmatch 'Vivi^|Microsoft Basic^|Remote Desktop^|Virtual^|Parsec^|VMware^|Hyper-V' }; $discrete = $gpus ^| Where-Object { $_.Name -match 'NVIDIA^|AMD^|Radeon^|GeForce^|RTX^|GTX' } ^| Select-Object -First 1; if ($discrete) { $discrete.Name.Trim() } elseif ($gpus) { ($gpus ^| Select-Object -First 1).Name.Trim() } else { '' } } catch { '' }"`) do set "GPU_INFO=%%I"
 if defined GPU_INFO echo   - GPU: !GPU_INFO!
 echo.
 echo   %CLR_SUBTITLE%Active Optimizations (check log for details):%CLR_RESET%
@@ -1375,7 +1375,7 @@ set "CHASSIS_TYPE=Unknown"
 set "IS_LAPTOP=0"
 set "CHASSIS_CODE="
 REM PowerShell for chassis detection
-for /f "usebackq delims=" %%I in (`"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "(Get-CimInstance Win32_SystemEnclosure).ChassisTypes[0]"`) do (
+for /f "usebackq delims=" %%I in (`%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "(Get-CimInstance Win32_SystemEnclosure).ChassisTypes[0]"`) do (
     set "CHASSIS_CODE=%%I"
 )
 if defined CHASSIS_CODE (
@@ -1432,7 +1432,7 @@ REM If this is a laptop and it is currently discharging on battery, warn before 
 if not "%IS_LAPTOP%"=="1" exit /b 0
 
 set "BAT_STATUS="
-for /f "usebackq delims=" %%B in (`"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "$b=Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue | Select-Object -First 1; if($b){$b.BatteryStatus}else{''}"`) do set "BAT_STATUS=%%B"
+for /f "usebackq delims=" %%B in (`%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$b=Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue | Select-Object -First 1; if($b){$b.BatteryStatus}else{''}"`) do set "BAT_STATUS=%%B"
 if not defined BAT_STATUS exit /b 0
 
 REM BatteryStatus: 1=Discharging, 2=AC, 3=Fully Charged (AC)
@@ -1461,7 +1461,7 @@ exit /b 0
 :DetectRAM
 set "RAM_GB="
 REM PowerShell for RAM detection
-for /f "usebackq delims=" %%I in (`"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "[int]([Math]::Round(((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1GB),0))"`) do (
+for /f "usebackq delims=" %%I in (`%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[int]([Math]::Round(((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1GB),0))"`) do (
     set "RAM_GB=%%I"
 )
 if defined RAM_GB (
@@ -1474,7 +1474,7 @@ exit /b 0
 :DetectStorageType
 set "STORAGE_TYPE=Unknown"
 REM PowerShell for storage detection
-for /f "usebackq delims=" %%I in (`"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "$d = Get-PhysicalDisk | Where-Object { $_.DeviceID -eq '0' }; if ($d) { $d.MediaType } else { 'Unknown' }"`) do (
+for /f "usebackq delims=" %%I in (`%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$d = Get-PhysicalDisk | Where-Object { $_.DeviceID -eq '0' }; if ($d) { $d.MediaType } else { 'Unknown' }"`) do (
     if "%%I"=="SSD" set "STORAGE_TYPE=SSD"
     if "%%I"=="HDD" set "STORAGE_TYPE=HDD"
 )
