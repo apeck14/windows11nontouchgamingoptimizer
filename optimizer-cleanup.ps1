@@ -130,7 +130,7 @@ function Get-CleanupRoots([string]$Scope) {
     if ($Scope -eq 'Deep') {
         $downloads = Get-DownloadsFolder
         if ($downloads) {
-            [pscustomobject]@{Path=$downloads; Category='Old download - review'; Days=90; Extensions=@('.exe','.msi','.msix','.zip','.7z','.rar','.iso')}
+            [pscustomobject]@{Path=$downloads; Category='Old download - review'; Days=90; Extensions=@('.exe','.msi','.msix','.msixbundle','.appx','.appxbundle','.cab','.msp','.zip','.7z','.rar','.iso')}
         }
         [pscustomobject]@{Path=(Join-Path $env:LOCALAPPDATA 'CrashDumps'); Category='Old crash dump'; Days=30; Extensions=@('.dmp')}
         foreach ($path in @($env:LOCALAPPDATA,$env:ProgramData)) {
@@ -169,7 +169,11 @@ function Test-CleanupPath([string]$Path) {
 }
 
 function Get-CleanupCandidates([string]$Scope) {
-    foreach ($root in @(Get-CleanupRoots $Scope)) {
+    Get-CleanupFiles @(Get-CleanupRoots $Scope)
+}
+
+function Get-CleanupFiles($Roots) {
+    foreach ($root in $Roots) {
         if (-not (Test-Path -LiteralPath $root.Path -PathType Container)) { continue }
         if (-not (Test-CleanupPath $root.Path)) { continue }
         $cutoff = (Get-Date).AddDays(-$root.Days)
@@ -177,14 +181,93 @@ function Get-CleanupCandidates([string]$Scope) {
         $pending = [Collections.Generic.Stack[string]]::new()
         $pending.Push($root.Path)
         while ($pending.Count) {
-            foreach ($item in @(Get-ChildItem -LiteralPath $pending.Pop() -Force -ErrorAction SilentlyContinue)) {
-                if (-not (Test-CleanupPath $item.FullName)) { continue }
-                if ($item.PSIsContainer) { $pending.Push($item.FullName); continue }
-                if ($item.LastWriteTime -ge $cutoff -or ($root.Extensions -and $item.Extension -notin $root.Extensions)) { continue }
-                [pscustomobject]@{Category=$root.Category; MB=[math]::Round($item.Length/1MB,2); Modified=$item.LastWriteTime; Path=$item.FullName; Bytes=$item.Length}
+            try { $items=@(Get-ChildItem -LiteralPath $pending.Pop() -Force -ErrorAction Stop) }
+            catch { if ($root.PackageRoot) { throw }; continue }
+            foreach ($item in $items) {
+                if (-not (Test-CleanupPath $item.FullName)) {
+                    if ($root.PackageRoot) { throw 'Driver package contains an inaccessible or linked path.' }
+                    continue
+                }
+                if ($item.PSIsContainer) { if (-not $root.LooseOnly) { $pending.Push($item.FullName) }; continue }
+                if (($null -ne $root.Days -and $item.LastWriteTime -ge $cutoff) -or ($root.Extensions -and $item.Extension -notin $root.Extensions)) { continue }
+                if ($root.Automatic -and $item.CreationTime -ge $cutoff) { continue }
+                [pscustomobject]@{Category=$root.Category; MB=[math]::Round($item.Length/1MB,2); Modified=$item.LastWriteTime; Created=$item.CreationTime; Path=$item.FullName; Bytes=$item.Length; Processes=$root.Processes; PackageRoot=$root.PackageRoot}
             }
         }
     }
+}
+
+function Test-CleanupBusy($Processes, [string]$PackageRoot) {
+    if (-not $Processes -and -not $PackageRoot) { return $false }
+    foreach ($process in Get-Process -ErrorAction Stop) {
+        if ($process.ProcessName -in $Processes) { return $true }
+        if ($PackageRoot -and $process.Path -and $process.Path.StartsWith($PackageRoot+'\',[StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
+}
+
+function Get-AutomaticCleanupRoots {
+    $browsers=@('chrome','msedge','brave','firefox','opera','vivaldi')
+    $downloads=Get-DownloadsFolder
+    if ($downloads) {
+        [pscustomobject]@{Path=$downloads;Category='Abandoned download';Days=30;Extensions=@('.crdownload','.part');LooseOnly=$true;Automatic=$true;Processes=$browsers}
+    }
+    foreach ($app in @(
+        @($env:LOCALAPPDATA,'Google\Chrome\User Data\Crashpad\reports','chrome'),
+        @($env:LOCALAPPDATA,'Microsoft\Edge\User Data\Crashpad\reports','msedge'),
+        @($env:LOCALAPPDATA,'BraveSoftware\Brave-Browser\User Data\Crashpad\reports','brave'),
+        @($env:APPDATA,'Mozilla\Firefox\Crash Reports','firefox'),
+        @($env:APPDATA,'discord\Crashpad\reports','Discord'),
+        @($env:APPDATA,'discordcanary\Crashpad\reports','DiscordCanary'),
+        @($env:APPDATA,'discordptb\Crashpad\reports','DiscordPTB')
+    )) {
+        [pscustomobject]@{Path=(Join-Path $app[0] $app[1]);Category='Old application crash report';Days=30;Extensions=@('.dmp','.extra','.txt');Automatic=$true;Processes=@($app[2])}
+    }
+    $profiles=Join-Path $env:APPDATA 'Mozilla\Firefox\Profiles'
+    if (Test-CleanupPath $profiles) {
+        foreach ($profile in Get-ChildItem -LiteralPath $profiles -Directory) {
+            [pscustomobject]@{Path=(Join-Path $profile.FullName 'minidumps');Category='Old application crash report';Days=30;Extensions=@('.dmp','.extra');Automatic=$true;Processes=@('firefox')}
+        }
+    }
+}
+
+function Get-DriverExtractionRoots {
+    foreach ($vendor in @('AMD','NVIDIA')) {
+        [pscustomobject]@{Path=(Join-Path $env:SystemDrive $vendor);Vendor=$vendor}
+    }
+}
+
+function Get-OldDriverExtractionFiles {
+    $processes=@('setup','msiexec','AMDSoftwareInstaller','InstallManagerApp','NVIDIAInstaller','NVI2')
+    foreach ($root in Get-DriverExtractionRoots) {
+        if (-not (Test-CleanupPath $root.Path) -or (Test-CleanupBusy $processes $root.Path)) { continue }
+        $packages=@(foreach ($folder in Get-ChildItem -LiteralPath $root.Path -Directory) {
+            try {
+                if (-not (Test-CleanupPath $folder.FullName)) { continue }
+                $setup=Join-Path $folder.FullName 'Setup.exe'
+                $drivers=Join-Path $folder.FullName $(if ($root.Vendor -eq 'AMD') {'Packages\Drivers\Display'} else {'Display.Driver'})
+                if (-not (Test-CleanupPath $setup) -or -not (Test-CleanupPath $drivers)) { continue }
+                $signature=Get-AuthenticodeSignature -LiteralPath $setup
+                $publisher=if ($root.Vendor -eq 'AMD') {'Advanced Micro Devices'} else {'NVIDIA Corporation'}
+                if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch [regex]::Escape($publisher)) { continue }
+                $spec=[pscustomobject]@{Path=$folder.FullName;Category='Old extracted driver installer';Days=$null;Processes=$processes;PackageRoot=$folder.FullName}
+                $files=@(Get-CleanupFiles @($spec))
+                if (-not @($files | Where-Object { $_.Path.StartsWith($drivers+'\',[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetExtension($_.Path) -eq '.inf' }).Count) { continue }
+                [pscustomobject]@{Files=$files;Newest=($files | ForEach-Object {$_.Modified; $_.Created} | Sort-Object -Descending | Select-Object -First 1);Path=$folder.FullName}
+            } catch { continue }
+        })
+        # Retain the most recent recognized package, even when every package is old.
+        foreach ($package in @($packages | Sort-Object Newest,Path -Descending | Select-Object -Skip 1)) {
+            if ($package.Newest -lt (Get-Date).AddDays(-30)) { $package.Files }
+        }
+    }
+}
+
+function Get-AutomaticCleanupFiles {
+    foreach ($root in Get-AutomaticCleanupRoots) {
+        if (-not (Test-CleanupBusy $root.Processes '')) { Get-CleanupFiles @($root) }
+    }
+    Get-OldDriverExtractionFiles
 }
 
 function Get-CleanupHash([string]$Path) {
@@ -207,7 +290,7 @@ function Get-DuplicateDownloads {
     if (-not $downloads -or -not (Test-Path -LiteralPath $downloads -PathType Container) -or -not (Test-CleanupPath $downloads)) { return }
     # Only loose downloads: never deduplicate inside extracted/portable applications.
     $files = @(Get-ChildItem -LiteralPath $downloads -File -ErrorAction Stop | Where-Object {
-        $_.Length -gt 0 -and $_.Extension -in @('.exe','.msi','.msix','.zip','.7z','.rar','.iso') -and (Test-CleanupPath $_.FullName)
+        $_.Length -gt 0 -and $_.Extension -in @('.exe','.msi','.msix','.msixbundle','.appx','.appxbundle','.cab','.msp','.zip','.7z','.rar','.iso') -and (Test-CleanupPath $_.FullName)
     })
     foreach ($size in @($files | Group-Object Length,Extension | Where-Object Count -gt 1)) {
         $hashed = @(foreach ($file in $size.Group) {
@@ -273,6 +356,8 @@ function Invoke-RecycleCleanup([string]$Scope) {
         Show-AppInventory
         Write-Host 'Automatically recycling identical loose installer/archive downloads; the oldest-created copy is kept.'
         $success = Invoke-RecycleFiles @(Get-DuplicateDownloads)
+        Write-Host 'Automatically recycling old crash reports, abandoned downloads and older verified driver extractions; the newest driver package is kept.'
+        if (-not (Invoke-RecycleFiles @(Get-AutomaticCleanupFiles))) { $success=$false }
     }
     $files = @(Get-CleanupCandidates $Scope | Sort-Object Path -Unique)
     if ($Scope -eq 'Deep') {
@@ -288,8 +373,10 @@ function Invoke-RecycleFiles($Files) {
     foreach ($file in $Files) {
         $keeper = $null
         try {
+            if (Test-CleanupBusy $file.Processes $file.PackageRoot) { throw 'Related application or installer is running; skipped.' }
             $current = Get-Item -LiteralPath $file.Path -Force -ErrorAction Stop
             if ($current.Length -ne $file.Bytes -or $current.LastWriteTime -ne $file.Modified) { throw 'File changed after scanning; skipped.' }
+            if ($file.Created -and $current.CreationTime -ne $file.Created) { throw 'File was replaced after scanning; skipped.' }
             if ($file.KeepPath) {
                 if ($file.Path -ieq $file.KeepPath -or -not (Test-CleanupPath $file.KeepPath)) { throw 'Retained copy is unavailable; skipped.' }
                 # Hold the survivor against writes/deletion throughout recycling its duplicate.

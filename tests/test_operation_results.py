@@ -722,6 +722,7 @@ $script:inventoryShown=$false
 function Get-CleanupCandidates {param($Scope) [pscustomobject]@{Path='example.zip';Modified=(Get-Date);Bytes=7}}
 function Show-AppInventory { $script:inventoryShown=$true}
 function Get-DuplicateDownloads {}
+function Get-AutomaticCleanupFiles {}
 function Show-StorageSummary {}
 function Out-GridView {param($Title,[switch]$PassThru)}
 function Move-CleanupFileToRecycleBin {throw 'Cancellation must not recycle'}
@@ -729,6 +730,155 @@ Invoke-RecycleCleanup Deep
 if(-not $script:inventoryShown){throw 'App inventory was not shown'}
 ''')
         self.assertEqual(rows[0]['Status'], 'AlreadyConfigured')
+
+    def test_automatic_downloads_require_both_dates_and_skip_nested_files_and_active_apps(self):
+        self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$env:APPDATA=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'roaming'
+$env:LOCALAPPDATA=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'local'
+$root=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'downloads'
+$null=New-Item -ItemType Directory (Join-Path $root 'nested') -Force
+foreach($name in @('old.part','old.crdownload','new.part','copied.part','old.zip','nested\old.part')) {
+    $p=Join-Path $root $name
+    [IO.File]::WriteAllText($p,'fixture')
+    (Get-Item $p).CreationTime=(Get-Date).AddDays(-40)
+    (Get-Item $p).LastWriteTime=(Get-Date).AddDays(-40)
+}
+(Get-Item (Join-Path $root 'new.part')).LastWriteTime=Get-Date
+(Get-Item (Join-Path $root 'copied.part')).CreationTime=Get-Date
+$script:fixtureDownloads=$root
+function Get-DownloadsFolder {$script:fixtureDownloads}
+function Get-Process {}
+function Get-OldDriverExtractionFiles {}
+$files=@(Get-AutomaticCleanupFiles)
+if($files.Count -ne 2){throw ('Age, extension or loose-download boundary failed: '+($files | ConvertTo-Json -Depth 4))}
+function Get-Process {[pscustomobject]@{ProcessName='chrome';Path=''}}
+if(@(Get-AutomaticCleanupFiles).Count){throw 'Active browser files selected'}
+''')
+
+    def test_automatic_crash_reports_use_known_paths_and_preserve_recent_reports(self):
+        self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$env:APPDATA=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'roaming'
+$env:LOCALAPPDATA=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'local'
+function Get-DownloadsFolder {''}
+function Get-Process {}
+function Get-OldDriverExtractionFiles {}
+$report=Join-Path $env:APPDATA 'discord\Crashpad\reports'
+$other=Join-Path $env:APPDATA 'discord\userdata'
+$null=New-Item -ItemType Directory $report,$other -Force
+foreach($p in @((Join-Path $report 'old.dmp'),(Join-Path $report 'recent.dmp'),(Join-Path $report 'keep.json'),(Join-Path $other 'old.dmp'))) {
+    [IO.File]::WriteAllText($p,'fixture')
+    (Get-Item $p).CreationTime=(Get-Date).AddDays(-40)
+    (Get-Item $p).LastWriteTime=(Get-Date).AddDays(-40)
+}
+(Get-Item (Join-Path $report 'recent.dmp')).LastWriteTime=Get-Date
+$files=@(Get-AutomaticCleanupFiles)
+if($files.Count -ne 1 -or $files[0].Path -ne (Join-Path $report 'old.dmp')){throw 'Crash report boundary failed'}
+function Get-Process {[pscustomobject]@{ProcessName='Discord';Path=''}}
+if(@(Get-AutomaticCleanupFiles).Count){throw 'Active Discord selected'}
+''')
+
+    def test_driver_extractions_require_signed_layout_keep_newest_and_skip_recent_or_running(self):
+        self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$root=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'drivers'
+function Get-DriverExtractionRoots {[pscustomobject]@{Path=$root;Vendor='NVIDIA'}}
+function Get-Process {}
+function Get-AuthenticodeSignature {param($LiteralPath)
+    [pscustomobject]@{Status=$(if($LiteralPath -like '*unsigned*'){'NotSigned'}else{'Valid'});SignerCertificate=[pscustomobject]@{Subject='CN=NVIDIA Corporation'}}
+}
+foreach($name in @('old','newest','recent','unsigned','unrecognized')) {
+    $p=Join-Path $root $name
+    $null=New-Item -ItemType Directory (Join-Path $p 'Display.Driver') -Force
+    [IO.File]::WriteAllText((Join-Path $p 'Setup.exe'),'fixture')
+    if($name -ne 'unrecognized'){[IO.File]::WriteAllText((Join-Path $p 'Display.Driver\nv.inf'),'fixture')}
+    foreach($file in Get-ChildItem $p -Recurse -File) {
+        $file.CreationTime=(Get-Date).AddDays(-60)
+        $file.LastWriteTime=(Get-Date).AddDays(-60)
+    }
+}
+(Get-Item (Join-Path $root 'newest\Setup.exe')).LastWriteTime=(Get-Date).AddDays(-40)
+(Get-Item (Join-Path $root 'recent\Setup.exe')).CreationTime=Get-Date
+$files=@(Get-OldDriverExtractionFiles)
+# The recent package is retained as newest; both older signed packages are eligible.
+if($files.Count -ne 4 -or @($files | Where-Object {$_.Path -match 'unsigned|unrecognized|recent'}).Count){throw 'Driver recognition or age boundary failed'}
+# Removing the recent recognized package leaves the newest old one protected.
+function Get-AuthenticodeSignature {param($LiteralPath)
+    [pscustomobject]@{Status=$(if($LiteralPath -match 'unsigned|recent'){'NotSigned'}else{'Valid'});SignerCertificate=[pscustomobject]@{Subject='CN=NVIDIA Corporation'}}
+}
+$files=@(Get-OldDriverExtractionFiles)
+if($files.Count -ne 2 -or @($files | Where-Object {$_.Path -notlike '*\old\*'}).Count){throw 'Newest old package was not retained'}
+function Get-Process {[pscustomobject]@{ProcessName='setup';Path=''}}
+if(@(Get-OldDriverExtractionFiles).Count){throw 'Running installer was ignored'}
+''')
+
+    def test_amd_driver_extractions_preserve_incomplete_and_wrong_publisher_packages(self):
+        self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$root=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'drivers'
+function Get-DriverExtractionRoots {[pscustomobject]@{Path=$root;Vendor='AMD'}}
+function Get-Process {}
+function Get-AuthenticodeSignature {param($LiteralPath)
+    [pscustomobject]@{Status='Valid';SignerCertificate=[pscustomobject]@{Subject=$(if($LiteralPath -like '*wrong*'){'CN=Other Company'}else{'CN=Advanced Micro Devices, Inc.'})}}
+}
+foreach($name in @('old','newest','wrong','incomplete')) {
+    $p=Join-Path $root $name
+    $null=New-Item -ItemType Directory (Join-Path $p 'Packages\Drivers\Display') -Force
+    [IO.File]::WriteAllText((Join-Path $p 'Setup.exe'),'fixture')
+    [IO.File]::WriteAllText((Join-Path $p 'Packages\Drivers\Display\amd.inf'),'fixture')
+    foreach($file in Get-ChildItem $p -Recurse -File) {
+        $file.CreationTime=(Get-Date).AddDays(-60)
+        $file.LastWriteTime=(Get-Date).AddDays(-60)
+    }
+}
+(Get-Item (Join-Path $root 'newest\Setup.exe')).LastWriteTime=(Get-Date).AddDays(-40)
+$originalPathCheck=${function:Test-CleanupPath}
+function Test-CleanupPath {param($Path)
+    if($Path -like '*\incomplete\Packages\Drivers\Display\amd.inf'){return $false}
+    & $originalPathCheck $Path
+}
+$files=@(Get-OldDriverExtractionFiles)
+if($files.Count -ne 2 -or @($files | Where-Object {$_.Path -notlike '*\old\*'}).Count){throw 'Unsafe AMD package selection'}
+''')
+
+    def test_automatic_cleanup_runs_before_optional_selection_and_rechecks_processes(self):
+        rows, _ = self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$p=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'old.part'
+[IO.File]::WriteAllText($p,'fixture')
+$file=[pscustomobject]@{Path=$p;Bytes=7;Modified=(Get-Item $p).LastWriteTime;Processes=@('chrome')}
+function Show-StorageSummary {}
+function Show-AppInventory {}
+function Get-DuplicateDownloads {}
+function Get-AutomaticCleanupFiles {$file}
+function Get-CleanupCandidates {}
+function Get-Process {}
+function Out-GridView {throw 'No review candidates'}
+function Move-CleanupFileToRecycleBin {param($Path) [IO.File]::Delete($Path)}
+Invoke-RecycleCleanup Deep
+if(Test-Path $p){throw 'Automatic cleanup did not recycle'}
+[IO.File]::WriteAllText($p,'fixture')
+$file.Modified=(Get-Item $p).LastWriteTime
+function Get-Process {[pscustomobject]@{ProcessName='chrome';Path=''}}
+if(Invoke-RecycleFiles @($file)){throw 'Running app must block recycling'}
+if(-not (Test-Path $p)){throw 'Running app file removed'}
+''')
+        self.assertEqual([r['Status'] for r in rows], ['Applied', 'AlreadyConfigured', 'Failed'])
+
+    def test_additional_package_extensions_deduplicate_by_content(self):
+        self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$root=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'downloads'
+$null=New-Item -ItemType Directory $root
+function Get-DownloadsFolder {$root}
+foreach($extension in @('.msixbundle','.appx','.appxbundle','.cab','.msp')) {
+    [IO.File]::WriteAllText((Join-Path $root ('first'+$extension)),'same')
+    [IO.File]::WriteAllText((Join-Path $root ('copy'+$extension)),'same')
+    [IO.File]::WriteAllText((Join-Path $root ('unique'+$extension)),'diff')
+}
+if(@(Get-DuplicateDownloads).Count -ne 5){throw 'New package types not deduplicated correctly'}
+''')
 
     def test_storage_measurement_does_not_double_count_nested_categories(self):
         self.run_case(r'''
