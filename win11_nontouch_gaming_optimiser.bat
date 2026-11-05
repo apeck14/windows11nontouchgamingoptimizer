@@ -33,7 +33,7 @@ if defined ESC (
 ::   - Maximizing gaming FPS and responsiveness  
 ::   - Optimizing network latency and throughput
 ::   - Reducing RAM/CPU usage from background services
-::   - All changes are logged and reversible
+::   - Changes are logged; undo is partial and cannot recover deleted files
 :: ---------------------------------------------------------------------------
 
 set "POWERSHELL=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
@@ -59,6 +59,7 @@ call :Log "=== Windows 11 Non-Touch Gaming Optimizer started ==="
 call :DetectOS
 call :DetectHardware
 call :DetectChassisType
+if errorlevel 1 exit /b 1
 call :DetectRAM
 call :DetectStorageType
 set "CHANGES_SUMMARY="
@@ -93,9 +94,10 @@ echo.
 echo    %CLR_MENU%[H]%CLR_RESET% Help / README
 echo    %CLR_MENU%[P]%CLR_RESET% View optimization report
 echo    %CLR_MENU%[V]%CLR_RESET% Verify optimizations status
-echo    %CLR_MENU%[U]%CLR_RESET% UNDO - Revert key changes
+echo    %CLR_MENU%[U]%CLR_RESET% UNDO - Partial rollback of key settings
 echo    %CLR_MENU%[0]%CLR_RESET% Exit
 echo.
+set "choice="
 set /p "choice=> "
 set "choice=%choice:~0,1%"
 if /I "%choice%"=="1" call :FullOptimization & call :PauseReturn & goto Menu
@@ -104,7 +106,7 @@ if /I "%choice%"=="2" call :RunRecommended & call :PauseReturn & goto Menu
 if /I "%choice%"=="3" call :CreateRestorePoint & call :PauseReturn & goto Menu
 if /I "%choice%"=="4" call :Debloat & call :PauseReturn & goto Menu
 if /I "%choice%"=="5" call :DisableTouchFeatures & call :PauseReturn & goto Menu
-if /I "%choice%"=="6" call :ApplyGamingTweaks & call :PauseReturn & goto Menu
+if /I "%choice%"=="6" call :GamingTweaksMenu & call :PauseReturn & goto Menu
 if /I "%choice%"=="7" call :OptimizeServices & call :PauseReturn & goto Menu
 if /I "%choice%"=="8" call :NetworkMenu & goto Menu
 if /I "%choice%"=="9" call :DisableAnimations & call :PauseReturn & goto Menu
@@ -133,6 +135,8 @@ echo   This will apply ALL gaming optimizations for maximum performance.
 echo   %CLR_WARNING%Estimated time: 5-10 minutes%CLR_RESET%
 echo ========================================================================
 echo.
+call :WarnIfOnBattery
+if errorlevel 1 exit /b 1
 call :CreateRestorePoint
 if errorlevel 1 exit /b 1
 echo.
@@ -141,8 +145,6 @@ call :Debloat
 echo [*] Step 2/15: Disabling touch/pen components...
 call :DisableTouchFeatures
 echo [*] Step 3/15: Applying gaming tweaks...
-call :WarnIfOnBattery
-if errorlevel 1 exit /b 1
 call :ApplyGamingTweaks
 echo [*] Step 4/15: Optimizing services and telemetry...
 call :OptimizeServices
@@ -188,14 +190,14 @@ echo   This will apply the most important gaming optimizations.
 echo   %CLR_WARNING%Estimated time: 3-5 minutes%CLR_RESET%
 echo ========================================================================
 echo.
+call :WarnIfOnBattery
+if errorlevel 1 exit /b 1
 call :CreateRestorePoint
 if errorlevel 1 exit /b 1
 echo.
 echo [*] Step 1/7: Removing consumer apps...
 call :Debloat
 echo [*] Step 2/7: Applying gaming tweaks...
-call :WarnIfOnBattery
-if errorlevel 1 exit /b 1
 call :ApplyGamingTweaks
 echo [*] Step 3/7: Optimizing services...
 call :OptimizeServices
@@ -220,34 +222,23 @@ call :Log "Creating system restore point"
 echo.
 echo [*] Checking restore point prerequisites...
 call :EnsureShadowServices
-echo    %CLR_MENU%[1]%CLR_RESET% Apply SAFE network tweaks (recommended)
-echo    %CLR_MENU%[2]%CLR_RESET% Apply AGGRESSIVE network tweaks (may affect VPN/throughput)
-echo    %CLR_MENU%[3]%CLR_RESET% Revert network tweaks to Windows defaults
-echo    %CLR_MENU%[4]%CLR_RESET% Return to main menu
+if errorlevel 1 (
+    echo [!] Required System Restore services are unavailable. No optimizations applied.
     call :Log "Restore point prerequisites missing"
     exit /b 1
-choice /c 1234 /n /m "Select an option: "
-echo [*] Creating system restore point...
-    "%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "Try { Checkpoint-Computer -Description 'NonTouchGamingOptimizer' -RestorePointType 'MODIFY_SETTINGS' -ErrorAction Stop; exit 0 } Catch { Write-Warning $_; exit 1 }" >> "%LOG_FILE%" 2>&1
-    call :ApplyNetworkTweaksSafe
-    echo.
-    echo ========================================================================
-    echo   [!] SYSTEM RESTORE POINT FAILED
-    echo ========================================================================
-    call :ApplyNetworkTweaks
-    echo.
-    echo   To enable System Protection:
-    echo   1. Open Control Panel ^> System ^> System Protection
-    echo   2. Select your C: drive and click "Configure"
-    call :RevertNetworkTweaks
-    call :PauseReturn
-    goto NetworkOptions
 )
-if "%netopt%"=="4" exit /b 0
-    echo.
-        call :Log "Restore point creation failed"
-        echo.
-        choice /c YN /n /m "Continue without a restore point? (Y/N): "
+echo [*] Creating system restore point...
+"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "Try { Checkpoint-Computer -Description 'NonTouchGamingOptimizer' -RestorePointType 'MODIFY_SETTINGS' -ErrorAction Stop -WarningAction Stop; exit 0 } Catch { Write-Warning $_; exit 1 }" >> "%LOG_FILE%" 2>&1
+if errorlevel 1 (
+    echo [!] Restore point was not created. No optimizations applied.
+    echo     Enable System Protection and check the log for the exact error.
+    echo     Windows may also limit creation if a recent restore point exists.
+    call :Log "Restore point creation failed; sequence cancelled"
+    exit /b 1
+)
+echo %CLR_SUCCESS%[+] Restore point created successfully.%CLR_RESET%
+call :Log "Restore point created"
+exit /b 0
 
 :ApplyNetworkTweaksSafe
 call :Log "Applying SAFE network tweaks"
@@ -265,7 +256,7 @@ REM Delivery Optimization (P2P updates) off for latency + bandwidth stability
 sc stop DoSvc >nul 2>&1
 sc config DoSvc start= disabled >nul 2>&1
 for %%T in ("\Microsoft\Windows\Delivery Optimization\Maintenance" "\Microsoft\Windows\Delivery Optimization\Download") do (
-    schtasks /Change /TN %%~T /Disable >nul 2>&1
+    schtasks /Change /TN "%%~T" /Disable >nul 2>&1
 )
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" /v DODownloadMode /t REG_DWORD /d 0 /f >nul
 
@@ -274,20 +265,6 @@ call :AddToSummary "Network optimized (safe)"
 echo.
 echo %CLR_SUCCESS%[+] Safe network tweaks applied!%CLR_RESET% Low risk, good baseline.
 echo     Log: %LOG_FILE%
-exit /b 0
-        if errorlevel 2 (
-            echo.
-            echo [!] Operation cancelled. Please enable System Protection and rerun the script.
-            call :Log "User aborted after restore failure"
-            exit /b 1
-        )
-        echo.
-        echo [!] Continuing without a restore point at user request...
-        call :Log "User chose to continue without restore point"
-) else (
-    echo %CLR_SUCCESS%[+] Restore point created successfully.%CLR_RESET%
-    call :Log "Restore point created"
-)
 exit /b 0
 
 :Debloat
@@ -369,18 +346,24 @@ echo %CLR_SUCCESS%[+] Touch and pen components disabled!%CLR_RESET%
 echo     Log: %LOG_FILE%
 exit /b 0
 
+:GamingTweaksMenu
+call :WarnIfOnBattery
+if errorlevel 1 exit /b 1
+call :ApplyGamingTweaks
+exit /b %errorlevel%
+
 :ApplyGamingTweaks
 call :BackupRegistryKeys
 call :Log "Applying gaming tweaks"
 echo.
 echo %CLR_TITLE%  ======================================================================%CLR_RESET%
-echo %CLR_TITLE%  ^^|                 GAMING PERFORMANCE TWEAKS                         ^^|%CLR_RESET%
+echo %CLR_TITLE%  ^|                 GAMING PERFORMANCE TWEAKS                         ^|%CLR_RESET%
 echo %CLR_TITLE%  ======================================================================%CLR_RESET%
 echo.
 if not defined DVR_PREF_SET (
     echo [*] Game Bar capture: keep it on, or disable for a small FPS gain?
     choice /c YN /n /d N /t 5 /m "Disable Game DVR background capture? (Y/N, default=N): "
-    if "%errorlevel%"=="1" (
+    if "!errorlevel!"=="1" (
         set "DISABLE_DVR=1"
     ) else (
         set "DISABLE_DVR=0"
@@ -390,7 +373,7 @@ if not defined DVR_PREF_SET (
 call :Log "Gaming tweaks: power plan"
 echo [*] Enabling Ultimate Performance plan (or High Performance fallback)...
 set "UP_GUID="
-for /f "tokens=3" %%G in ('powercfg -duplicatescheme e9a42b02-d5df-448d-aa00-03f14749eb61 2^>nul ^| find /i "GUID"') do set "UP_GUID=%%G"
+for /f "tokens=4" %%G in ('powercfg -duplicatescheme e9a42b02-d5df-448d-aa00-03f14749eb61 2^>nul ^| find /i "GUID"') do set "UP_GUID=%%G"
 if not defined UP_GUID set "UP_GUID=e9a42b02-d5df-448d-aa00-03f14749eb61"
 powercfg -setactive %UP_GUID% >nul 2>&1
 if errorlevel 1 powercfg -setactive SCHEME_MIN >nul 2>&1
@@ -464,7 +447,7 @@ reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\kernel" /v Global
 REM bcdedit changes - can cause issues on some systems, proceed with caution
 for %%B in ("useplatformclock true" "disabledynamictick yes") do (
     bcdedit /set %%~B >nul 2>&1
-    if errorlevel 1 call :Log "Warning: bcdedit /set %%~B failed - may require Secure Boot disabled"
+    if errorlevel 1 call :Log "Warning: bcdedit /set %%~B failed; leaving boot security settings unchanged"
 )
 
 echo [*] Prioritizing foreground apps (games) over background tasks...
@@ -511,7 +494,7 @@ for %%T in (
     "\Microsoft\Windows\Autochk\Proxy"
     "\Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector"
 ) do (
-    schtasks /Change /TN %%~T /Disable >nul 2>&1
+    schtasks /Change /TN "%%~T" /Disable >nul 2>&1
 )
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v AllowTelemetry /t REG_DWORD /d 0 /f >nul
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection" /v AllowTelemetry /t REG_DWORD /d 0 /f >nul
@@ -541,26 +524,16 @@ echo ========================================================================
 echo   %CLR_TITLE%NETWORK OPTIMIZATION MENU%CLR_RESET%
 echo ========================================================================
 echo.
-echo    %CLR_MENU%[1]%CLR_RESET% Apply gaming network tweaks (lower ping/latency)
-echo    %CLR_MENU%[2]%CLR_RESET% Revert network tweaks to Windows defaults
-echo    %CLR_MENU%[3]%CLR_RESET% Return to main menu
-echo.
-echo ========================================================================
-choice /c 123 /n /m "Select an option: "
+echo    %CLR_MENU%[1]%CLR_RESET% Apply SAFE network tweaks
+echo    %CLR_MENU%[2]%CLR_RESET% Apply AGGRESSIVE tweaks - may affect VPN/throughput
+echo    %CLR_MENU%[3]%CLR_RESET% Revert network tweaks to defaults
+echo    %CLR_MENU%[4]%CLR_RESET% Return to main menu
+choice /c 1234 /n /m "Select an option: "
 set "netopt=%errorlevel%"
-if "%netopt%"=="1" (
-    call :ApplyNetworkTweaks
-    call :PauseReturn
-    goto NetworkOptions
-)
-if "%netopt%"=="2" (
-    call :RevertNetworkTweaks
-    call :PauseReturn
-    goto NetworkOptions
-)
-if "%netopt%"=="3" exit /b 0
-echo.
-echo [!] Unknown selection - try again.
+if "%netopt%"=="4" exit /b 0
+if "%netopt%"=="1" call :ApplyNetworkTweaksSafe
+if "%netopt%"=="2" call :ApplyNetworkTweaks
+if "%netopt%"=="3" call :RevertNetworkTweaks
 call :PauseReturn
 goto NetworkOptions
 
@@ -619,7 +592,7 @@ for %%V in (TcpTimedWaitDelay MaxUserPort Tcp1323Opts TcpNoDelay TcpAckFrequency
 sc config DoSvc start= delayed-auto >nul 2>&1
 sc start DoSvc >nul 2>&1
 for %%T in ("\Microsoft\Windows\Delivery Optimization\Maintenance" "\Microsoft\Windows\Delivery Optimization\Download") do (
-    schtasks /Change /TN %%~T /Enable >nul 2>&1
+    schtasks /Change /TN "%%~T" /Enable >nul 2>&1
 )
 for %%V in (DODownloadMode DOMaxUploadBandwidth DOMaxUploadPercentage) do (
     reg delete "HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" /v %%V /f >nul 2>&1
@@ -747,12 +720,7 @@ if "!CHASSIS_TYPE!"=="Laptop" (
 call :ClearTemp "%TEMP%"
 if defined LOCALAPPDATA call :ClearTemp "%LOCALAPPDATA%\Temp"
 call :ClearTemp "%SystemRoot%\Temp"
-net stop wuauserv >nul 2>&1
-net stop bits >nul 2>&1
-if exist "%SystemRoot%\SoftwareDistribution\Download" rd /s /q "%SystemRoot%\SoftwareDistribution\Download"
-mkdir "%SystemRoot%\SoftwareDistribution\Download" >nul 2>&1
-net start wuauserv >nul 2>&1
-net start bits >nul 2>&1
+REM Leave Windows Update cache and service state to Windows maintenance.
 "%SystemRoot%\System32\dism.exe" /Online /Cleanup-Image /StartComponentCleanup >> "%LOG_FILE%" 2>&1
 call :Log "Disk cleanup complete"
 call :AddToSummary "Disk space freed"
@@ -780,15 +748,28 @@ call :AddToSummary "Memory optimizations applied"
 exit /b 0
 
 :ClearTemp
-set "TARGET=%~1"
-if not defined TARGET exit /b 0
-if not exist "%TARGET%" exit /b 0
-call :Log "Clearing %TARGET%"
-pushd "%TARGET%" >nul 2>&1 || exit /b 0
-del /f /s /q *.* >nul 2>&1
-for /d %%D in (*) do rd /s /q "%%D" >nul 2>&1
-popd >nul 2>&1
-exit /b 0
+setlocal
+set "OPTIMIZER_CLEANUP_TARGET=%~1"
+if not defined OPTIMIZER_CLEANUP_TARGET (
+    endlocal
+    exit /b 0
+)
+call :Log "Clearing temporary files in %OPTIMIZER_CLEANUP_TARGET%"
+REM Allow only standard temp directories. Skip junctions/symlinks, including ancestors.
+REM Do not use Remove-Item -Recurse: walk validated directories explicitly.
+"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command ^
+ "$ErrorActionPreference='Stop'; try {" ^
+ "$target=[IO.Path]::GetFullPath($env:OPTIMIZER_CLEANUP_TARGET).TrimEnd('\');" ^
+ "$allowed=@(); if($env:LOCALAPPDATA){$allowed += [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Temp')).TrimEnd('\')}; if($env:SystemRoot){$allowed += [IO.Path]::GetFullPath((Join-Path $env:SystemRoot 'Temp')).TrimEnd('\')};" ^
+ "if($target -notin $allowed){throw 'Refusing nonstandard temp directory'};" ^
+ "if(-not (Test-Path -LiteralPath $target)){exit 0};" ^
+ "$dir=Get-Item -LiteralPath $target -Force; if(-not $dir.PSIsContainer){throw 'Target is not a directory'};" ^
+ "for($ancestor=$dir; $null -ne $ancestor; $ancestor=$ancestor.Parent){if($ancestor.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Refusing reparse point in temp path'}};" ^
+ "function Clear-TempDirectory([string]$path){foreach($item in Get-ChildItem -LiteralPath $path -Force){if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){continue}; if($item.PSIsContainer){Clear-TempDirectory $item.FullName; if(@(Get-ChildItem -LiteralPath $item.FullName -Force).Count -ne 0){continue}}; try {Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop} catch {Write-Warning $_}}};" ^
+ "Clear-TempDirectory $target; exit 0 } catch {Write-Warning $_; exit 1}" >> "%LOG_FILE%" 2>&1
+set "CLEANUP_RESULT=%errorlevel%"
+if not "%CLEANUP_RESULT%"=="0" call :Log "Temp cleanup skipped or incomplete; see log"
+endlocal & exit /b %CLEANUP_RESULT%
 
 :OptimizePageFile
 call :Log "Optimizing page file based on RAM=%RAM_GB%GB"
@@ -807,7 +788,7 @@ if %RAM_GB% GEQ 16 (
 ) else if %RAM_GB% GEQ 8 (
     echo     System RAM: %RAM_GB%GB - Setting fixed page file (4GB)
     REM Win32_PageFileSetting may not exist when automatic management is enabled; set via CIM + registry for reliability.
-    "%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "$cs = Get-CimInstance Win32_ComputerSystem; $cs | Set-CimInstance -Property @{AutomaticManagedPagefile=$false}; Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' -Name PagingFiles -Value @('C:\\pagefile.sys 4096 4096')" >nul 2>&1
+    "%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "$cs = Get-CimInstance Win32_ComputerSystem; $cs | Set-CimInstance -Property @{AutomaticManagedPagefile=$false}; Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' -Name PagingFiles -Value @(($env:SystemDrive + '\pagefile.sys 4096 4096'))" >nul 2>&1
     if errorlevel 1 call :Log "Warning: Failed setting fixed page file size"
     call :Log "Page file: Fixed 4GB (8-15GB RAM detected)"
     call :AddToSummary "Page file fixed at 4GB"
@@ -831,8 +812,6 @@ if not defined SCHEME_GUID (
 )
 powercfg -setacvalueindex %SCHEME_GUID% SUB_PROCESSOR CPMINCORES 100 >nul 2>&1
 powercfg -setactive %SCHEME_GUID% >nul 2>&1
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\Power\PowerSettings\54533251-82be-4824-96c1-47b60b740d00\0cc5b647-c1df-4637-891a-dec35c318583" /v ValueMax /t REG_DWORD /d 0 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\Power\PowerSettings\54533251-82be-4824-96c1-47b60b740d00\0cc5b647-c1df-4637-891a-dec35c318583" /v ValueMin /t REG_DWORD /d 0 /f >nul
 call :Log "Core parking disabled"
 call :AddToSummary "CPU core parking disabled"
 exit /b 0
@@ -844,20 +823,18 @@ if /I "%STORAGE_TYPE%"=="SSD" (
     echo     Storage: SSD detected - Optimizing for solid state
     reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v NtfsDisableLastAccessUpdate /t REG_DWORD /d 1 /f >nul
     fsutil behavior set DisableDeleteNotify 0 >nul 2>&1
-    schtasks /Change /TN "\Microsoft\Windows\Defrag\ScheduledDefrag" /Disable >nul 2>&1
     if %RAM_GB% GEQ 8 (
         "%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "Disable-MMAgent -PageCombining" >nul 2>&1
-        call :Log "SSD: TRIM enabled, defrag disabled, page combining off"
+        call :Log "SSD: TRIM enabled, maintenance schedule preserved, page combining off"
     ) else (
-        call :Log "SSD: TRIM enabled, defrag disabled"
+        call :Log "SSD: TRIM enabled, maintenance schedule preserved"
     )
     call :AddToSummary "SSD optimizations applied"
 ) else if /I "%STORAGE_TYPE%"=="HDD" (
     echo     Storage: HDD detected - Enabling prefetch
     reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters" /v EnablePrefetcher /t REG_DWORD /d 3 /f >nul
     reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters" /v EnableSuperfetch /t REG_DWORD /d 3 /f >nul
-    schtasks /Change /TN "\Microsoft\Windows\Defrag\ScheduledDefrag" /Enable >nul 2>&1
-    call :Log "HDD: Prefetch enabled, defrag scheduled"
+    call :Log "HDD: Prefetch enabled, maintenance schedule preserved"
     call :AddToSummary "HDD optimizations applied"
 ) else (
     echo     Storage: Unknown type - Applying safe defaults
@@ -910,7 +887,6 @@ echo [*] Optimizing storage for SSDs and gaming drives...
 reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v NtfsDisableLastAccessUpdate /t REG_DWORD /d 1 /f >nul
 reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v NtfsDisable8dot3NameCreation /t REG_DWORD /d 1 /f >nul
 reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v DontVerifyRandomDrivers /t REG_DWORD /d 1 /f >nul
-schtasks /Change /TN "\Microsoft\Windows\Defrag\ScheduledDefrag" /Disable >nul 2>&1
 fsutil behavior set DisableDeleteNotify 0 >nul 2>&1
 
 echo [*] Optimizing process priorities...
@@ -1011,11 +987,11 @@ echo   - Disabling touch/pen features (for non-touch PCs)
 echo   - Applying gaming-focused performance tweaks
 echo   - Optimizing network latency and throughput
 echo   - Reducing background CPU/RAM usage
-echo   - All changes are logged and reversible
+echo   - Changes are logged; undo is partial and cannot recover deleted files
 echo.
 echo   %CLR_SUBTITLE%QUICK START (RECOMMENDED):%CLR_RESET%
-echo   1. Select [3] to create a restore point
-echo   2. Select [2] for "Recommended" optimization (3-5 min)
+echo   1. Enable System Protection
+echo   2. Select [2] for "Recommended" optimization; it creates a restore point
 echo   3. Restart your PC
 echo.
 echo   %CLR_SUBTITLE%MENU OPTIONS:%CLR_RESET%
@@ -1046,9 +1022,9 @@ echo   Bloat: Removed Bing apps, Xbox TCUI, Teams, Spotify, TikTok, etc.
 echo   Visual: Transparency off, animations disabled
 echo.
 echo   %CLR_SUBTITLE%SAFETY FEATURES:%CLR_RESET%
-echo   - System restore point creation before changes
+echo   - Restore point required for Full and Recommended; manual for individual actions
 echo   - Comprehensive logging to logs\ folder
-echo   - Undo function reverts most changes
+echo   - Undo function attempts a partial rollback only
 echo   - Xbox Game Bar preserved by default (option to disable)
 echo.
 echo   %CLR_WARNING%IMPORTANT NOTES:%CLR_RESET%
@@ -1070,8 +1046,8 @@ echo   %CLR_SUBTITLE%TROUBLESHOOTING:%CLR_RESET%
 echo   Restore point failed:  Enable System Protection in Control Panel
 echo   Changes not working:   Restart your PC
 echo   Game Bar not working:  Don't use option [E], or run [U] to undo
-echo   Network issues:        Use [8] ^> [2] to revert network tweaks
-echo   Want full rollback:    Use Windows System Restore
+echo   Network issues:        Use [8] ^> [3] to revert network tweaks
+echo   Recovery:              System Restore for settings; backups for deleted files
 echo.
 echo   %CLR_SUBTITLE%MANUAL TWEAKS (OPTIONAL):%CLR_RESET%
 echo   NVIDIA: Control Panel ^> Low Latency Mode = Ultra
@@ -1130,6 +1106,11 @@ call :Log "Report displayed"
 exit /b 0
 
 :UndoChanges
+set "MOUSE_RESTORED="
+echo [!] Partial rollback only. Original service states were not saved.
+echo     Remote Registry and Routing/Remote Access will not be enabled.
+choice /c YN /n /d N /t 15 /m "Apply partial rollback defaults? (Y/N, default=N): "
+if not "%errorlevel%"=="1" exit /b 1
 call :Log "Undo routine requested"
 echo.
 echo ========================================================================
@@ -1137,14 +1118,18 @@ echo   %CLR_TITLE%REVERTING CHANGES%CLR_RESET%
 echo ========================================================================
 echo.
 echo [*] Attempting to revert services, registry settings, and network changes...
-for %%S in (TabletInputService TextInputManagementService TouchInput WTabletServiceCon WTabletServicePen PenService TabletInputHost SysMain WSearch DiagTrack dmwappushservice RetailDemo RemoteRegistry RemoteAccess MapsBroker TrkWks DoSvc XblAuthManager XblGameSave XboxGipSvc XboxNetApiSvc) do (
+for %%S in (TabletInputService TextInputManagementService TouchInput WTabletServiceCon WTabletServicePen PenService TabletInputHost SysMain WSearch DiagTrack dmwappushservice RetailDemo MapsBroker TrkWks DoSvc XblAuthManager XblGameSave XboxGipSvc XboxNetApiSvc) do (
     sc config %%S start= demand >nul 2>&1
     sc start %%S >nul 2>&1
 )
 if exist "%LOG_DIR%\mouse_settings_backup.reg" (
     reg import "%LOG_DIR%\mouse_settings_backup.reg" >nul 2>&1
-    set "MOUSE_RESTORED=1"
-    call :Log "Mouse settings restored from backup"
+    if not errorlevel 1 (
+        set "MOUSE_RESTORED=1"
+        call :Log "Mouse settings restored from backup"
+    ) else (
+        call :Log "Mouse settings import failed"
+    )
 )
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v AllowTelemetry /t REG_DWORD /d 3 /f >nul
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection" /v AllowTelemetry /t REG_DWORD /d 3 /f >nul
@@ -1175,10 +1160,9 @@ if not defined MOUSE_RESTORED (
     reg add "HKCU\Control Panel\Mouse" /v MouseThreshold1 /t REG_SZ /d 6 /f >nul
     reg add "HKCU\Control Panel\Mouse" /v MouseThreshold2 /t REG_SZ /d 10 /f >nul
 )
-schtasks /Change /TN "\Microsoft\Windows\Defrag\ScheduledDefrag" /Enable >nul 2>&1
 call :Log "Undo routine completed"
 echo.
-echo %CLR_SUCCESS%[+] Revert complete!%CLR_RESET% Services and settings restored to defaults.
+echo [*] Partial rollback attempted. Check the log; this is not a complete restore.
 echo     Check %LOG_FILE% for details. %CLR_WARNING%Restart recommended.%CLR_RESET%
 exit /b 0
 
@@ -1271,7 +1255,10 @@ for %%S in (VSS swprv) do (
         set "ENSURE_SHADOW_ERROR=1"
     ) else (
         sc config %%S start= demand >nul 2>&1
-        sc start %%S >nul 2>&1
+        if errorlevel 1 set "ENSURE_SHADOW_ERROR=1"
+        REM Start-Service also succeeds when the service is already running.
+        "%POWERSHELL%" -NoProfile -Command "try { Start-Service -Name '%%S' -ErrorAction Stop; exit 0 } catch { exit 1 }" >nul 2>&1
+        if errorlevel 1 set "ENSURE_SHADOW_ERROR=1"
     )
 )
 if defined ENSURE_SHADOW_ERROR (
@@ -1335,7 +1322,8 @@ if defined RELAUNCHED (
     exit /b 1
 )
 echo [*] Requesting administrator approval via UAC...
-"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "$p=Start-Process '%~f0' -ArgumentList '-Elevated' -WorkingDirectory '%SCRIPT_DIR%' -Verb RunAs -PassThru; exit 0" >nul 2>&1
+set "OPTIMIZER_SCRIPT=%~f0"
+"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "$p=Start-Process -FilePath $env:OPTIMIZER_SCRIPT -ArgumentList '-Elevated' -WorkingDirectory $env:SCRIPT_DIR -Verb RunAs -PassThru; exit 0" >nul 2>&1
 if errorlevel 1 (
     echo [!] Automatic UAC prompt failed. Run this script as administrator.
     pause
@@ -1401,7 +1389,7 @@ if "%IS_LAPTOP%"=="1" (
     echo %CLR_WARNING%  ================================================================%CLR_RESET%
     echo.
     choice /c YN /n /t 10 /d N /m "Continue with optimization on laptop? (Y/N, auto-No in 10s): "
-    if not "%errorlevel%"=="1" (
+    if not "!errorlevel!"=="1" (
         call :Log "User cancelled - laptop warning"
         echo.
         echo [!] Optimization cancelled. Exiting to protect battery life.
@@ -1414,7 +1402,7 @@ exit /b 0
 
 :WarnIfOnBattery
 REM If this is a laptop and it is currently discharging on battery, warn before applying aggressive CPU/power tweaks.
-if /I not "%CHASSIS_TYPE%"=="Laptop" exit /b 0
+if not "%IS_LAPTOP%"=="1" exit /b 0
 
 set "BAT_STATUS="
 for /f "usebackq delims=" %%B in (`"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "$b=Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue | Select-Object -First 1; if($b){$b.BatteryStatus}else{''}"`) do set "BAT_STATUS=%%B"
@@ -1432,7 +1420,7 @@ if "%BAT_STATUS%"=="1" (
     echo   %CLR_WARNING%Recommendation:%CLR_RESET% Plug in AC power, then rerun.
     echo.
     choice /c YN /n /t 10 /d N /m "Continue anyway? (Y/N, auto-No in 10s): "
-    if not "%errorlevel%"=="1" (
+    if not "!errorlevel!"=="1" (
         call :Log "User aborted due to on-battery warning"
         echo.
         echo [!] Optimization cancelled. Plug in power and try again.
@@ -1467,15 +1455,15 @@ call :Log "Detected storage type: %STORAGE_TYPE%"
 exit /b 0
 
 :BackupRegistryKeys
-if exist "%LOG_DIR%\registry_backup_%STAMP%.reg" exit /b 0
-call :Log "Creating comprehensive registry backup"
+if exist "%LOG_DIR%\registry_backup_%STAMP%.txt" exit /b 0
+call :Log "Backing up selected registry keys"
 echo [*] Creating registry backup before changes...
-set "BACKUP_FILE=%LOG_DIR%\registry_backup_%STAMP%.reg"
+set "BACKUP_FILE=%LOG_DIR%\registry_backup_%STAMP%.txt"
 (
-    echo Windows Registry Editor Version 5.00
+    echo Selected registry exports are stored separately in backup_*_%STAMP%.reg
     echo.
     echo ; Gaming Optimizer Registry Backup - %STAMP%
-    echo ; Backed up before modifications
+    echo This is a manifest, not a full registry backup or an importable REG file.
     echo.
 ) > "%BACKUP_FILE%"
 reg export "HKCU\Control Panel\Mouse" "%LOG_DIR%\backup_mouse_%STAMP%.reg" /y >nul 2>&1
@@ -1655,8 +1643,8 @@ exit /b 0
 
 :Log
 set "MESSAGE=%~1"
-echo %DATE% %TIME% - %MESSAGE%
->>"%LOG_FILE%" echo %DATE% %TIME% - %MESSAGE%
+echo %DATE% %TIME% - !MESSAGE!
+>>"%LOG_FILE%" echo %DATE% %TIME% - !MESSAGE!
 exit /b 0
 
 :End

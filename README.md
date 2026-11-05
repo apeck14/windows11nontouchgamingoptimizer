@@ -2,11 +2,23 @@
 
 **by Matt Hurley**
 
-[GitHub Repository](https://github.com/theantipopau/windows11nontouchgamingoptimizer)
+[This fork](https://github.com/apeck14/windows11nontouchgamingoptimizer) | [Original repository by Matt Hurley](https://github.com/theantipopau/windows11nontouchgamingoptimizer)
 
-A comprehensive, menu-driven batch script to optimize Windows 11 for maximum gaming performance on non-touchscreen desktops and laptops. All changes are logged and reversible.
+A comprehensive, menu-driven batch script to optimize Windows 11 for maximum gaming performance on non-touchscreen desktops and laptops. Changes are logged. Undo is partial and cannot recover deleted files.
 
 ---
+
+## Fork fixes and limits
+
+This fork repairs restore-point control flow, stale prompt exit codes, laptop cancellation, quoted task names, power-plan GUID parsing, the page-file path, and a malformed gaming-menu banner. Safe and aggressive network modes are both reachable. Battery confirmation happens before Full/Recommended changes. Boot-setting failures do not suggest disabling Secure Boot.
+
+Full and Recommended abort if creating a restore point fails or produces a warning (including Windows' recent-restore-point limit). Individual actions still require you to create a restore point yourself. These routines have been regression-tested with mocked system commands, not applied to a live Windows installation.
+
+Temporary-file cleanup accepts only `%LOCALAPPDATA%\Temp` and `%SystemRoot%\Temp`, skips reparse points (junctions/symlinks), and leaves Windows Update's cache and services alone. Custom `%TEMP%` locations are skipped. Existing Optimize Drives schedules are preserved, including SSD maintenance; core parking uses the active power setting without rewriting its allowed range.
+
+**Undo is a partial reset to chosen defaults, not restoration of your original configuration.** It requires confirmation and never enables Remote Registry or Routing and Remote Access. Registry exports cover selected keys only. Removed apps, deleted files, GPU settings, power settings, page-file settings, and other changes are not fully recovered by Undo. Keep an independent backup; System Restore is not a file backup.
+
+Run the non-administrative regression tests with `python tests/test_regressions.py`. They execute extracted batch routines with system changes stubbed out and test cleanup only inside a temporary test directory.
 
 ## 🎮 Features
 
@@ -27,14 +39,14 @@ A comprehensive, menu-driven batch script to optimize Windows 11 for maximum gam
 - **Optional Xbox Service Disable** - For users who don't use Game Bar or Xbox features (requires confirmation)
 
 ### **Safety & Convenience**
-- **System Restore Point** - Automatic restore point creation before changes
+- **System Restore Point** - Restore point required before Full/Recommended changes
 - **Comprehensive Logging** - All actions timestamped and logged for audit trail
-- **Registry Backup** - Full backup of all modified registry keys before changes
+- **Registry Backup** - Exports of selected registry keys; not a full backup
 - **Laptop Detection** - Warns laptop users about battery impact, offers opt-out
 - **Hardware Detection** - Correctly identifies discrete GPUs on hybrid systems (iGPU + NVIDIA/AMD)
 - **Verification Tool** - Check which optimizations are currently active
 - **Changes Summary** - Clear summary of what was modified after each run
-- **Undo Function** - Revert most changes back to Windows defaults
+- **Undo Function** - Attempt a partial reset of selected settings after confirmation
 - **Optimization Report** - View system specs and applied optimizations
 - **Full & Recommended Modes** - Run all tweaks at once or just the essentials
 
@@ -54,7 +66,7 @@ A comprehensive, menu-driven batch script to optimize Windows 11 for maximum gam
 
 ### **Recommended First Run**
 ```
-1. Select option [3] to create a system restore point
+1. Enable System Protection (Recommended creates its own restore point)
 2. Select option [2] for "Recommended" optimization (5 minutes)
 3. Restart your PC
 ```
@@ -131,7 +143,7 @@ A comprehensive, menu-driven batch script to optimize Windows 11 for maximum gam
 
 ### **Storage**
 - **Smart detection**: Auto-detects SSD vs HDD
-- **SSD optimizations**: TRIM enabled, defrag disabled, last access updates disabled
+- **SSD optimizations**: TRIM enabled, existing Optimize Drives schedule preserved, last access updates disabled
 - **HDD optimizations**: Prefetch/Superfetch enabled, scheduled defrag maintained
 - 8.3 filename creation disabled
 - Disk cleanup with DISM component cleanup
@@ -159,7 +171,7 @@ Consumer apps: Bing News/Weather/Finance, Clipchamp, GetHelp, Office Hub, Solita
 ## 🛡️ Safety Features
 
 ### **System Restore Point**
-The script attempts to create a restore point before making changes. If System Protection is not enabled:
+Full and Recommended require successful restore-point creation before optimization; individual actions do not create one automatically. If System Protection is not enabled:
 1. Open Control Panel → System → System Protection
 2. Select C: drive → Configure
 3. Enable "Turn on system protection"
@@ -175,8 +187,8 @@ logs\nontouch_gaming_optimizer_YYYYMMDD_HHMMSS.log
 ```
 
 ### **Undo Function**
-The **[U]** option reverts most changes:
-- Re-enables disabled services
+The **[U]** option attempts a partial rollback to selected defaults:
+- Resets selected services to Manual and attempts to start them; excludes Remote Registry and Routing/Remote Access
 - Restores telemetry/search defaults
 - Re-enables animations
 - Reverts network tweaks
@@ -184,7 +196,7 @@ The **[U]** option reverts most changes:
 - Restores mouse acceleration
 - Restores original mouse pointer settings from backup (if available)
 
-**Note:** Some changes (like removed apps) cannot be automatically restored. Use System Restore for complete rollback.
+**Note:** This is not a complete rollback. Original service states and many settings are not restored. System Restore may recover system settings but cannot recover deleted personal files; keep independent backups.
 
 ---
 
@@ -327,7 +339,7 @@ The verification tool shows **[PASS]** or **[WARN]** for each check and displays
 ### **"Restore point creation failed"**
 - Enable System Protection (see Safety Features section)
 - Verify **Volume Shadow Copy** and **Microsoft Software Shadow Copy Provider** services are set to Manual and running
-- You can continue without a restore point (not recommended)
+- Full/Recommended stop if a restore point cannot be created; inspect the log before retrying
 
 ### **Laptop battery warning / power concerns**
 - The script detects laptop chassis types and warns before applying aggressive tweaks
@@ -347,7 +359,7 @@ The verification tool shows **[PASS]** or **[WARN]** for each check and displays
 ### **Game/app not working after optimization**
 1. Use option **[U]** to undo changes
 2. Restart your PC
-3. If issues persist, use System Restore to restore point created in step 3
+3. If issues persist, consider System Restore to the pre-optimization restore point
 
 ---
 
@@ -378,8 +390,8 @@ What's new in v2.4 (high level):
   ```
 
 ### **Network issues after optimization**
-- Use option **[8]** → **[2]** to revert network tweaks
-- Or run option **[U]** to undo all changes
+- Use option **[8]** → **[3]** to revert network tweaks
+- Or run option **[U]** for the documented partial rollback
 
 ---
 
@@ -416,7 +428,7 @@ What's new in v2.4 (high level):
 
 ### **Version 2.3**
 - **New:** Laptop detection with battery warning - auto-detects chassis type, warns users about power impact
-- **New:** Comprehensive registry backup - all modified keys backed up before changes to logs folder
+- **New:** Selected registry exports saved to the logs folder (not all modified keys)
 - **New:** Verification tool [V] - check which optimizations are currently active with pass/fail status
 - **New:** Changes summary - displays clear list of applied changes after optimization runs
 - **Enhanced:** Banner now shows chassis type (Desktop/Laptop) for quick identification
@@ -505,7 +517,7 @@ SOFTWARE.
 
 ## ⚖️ Disclaimer
 
-**USE AT YOUR OWN RISK.** This script modifies system settings and registry values. While all changes are designed to be safe and reversible:
+**USE AT YOUR OWN RISK.** This script modifies system settings and registry values. Some changes are destructive or only partially reversible:
 
 - Always create a system restore point before running
 - Review the log files to understand what changed
