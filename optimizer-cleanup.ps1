@@ -172,6 +172,7 @@ function Get-CleanupFiles($Roots) {
     foreach ($root in $Roots) {
         if (-not (Test-Path -LiteralPath $root.Path -PathType Container)) { continue }
         if (-not (Test-CleanupPath $root.Path)) { continue }
+        if (Test-CleanupBusy $root.Processes $root.PackageRoot) { continue }
         $cutoff = (Get-Date).AddDays(-$root.Days)
         # Enumerate ourselves so recursion never enters a junction or cloud folder.
         $pending = [Collections.Generic.Stack[string]]::new()
@@ -298,9 +299,7 @@ function Get-OldDriverExtractionFiles {
 }
 
 function Get-AutomaticCleanupFiles {
-    foreach ($root in Get-AutomaticCleanupRoots) {
-        if (-not (Test-CleanupBusy $root.Processes '')) { Get-CleanupFiles @($root) }
-    }
+    Get-CleanupFiles @(Get-AutomaticCleanupRoots)
     Get-OldDriverExtractionFiles
 }
 

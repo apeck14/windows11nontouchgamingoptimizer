@@ -825,6 +825,10 @@ function Get-Process {
     }
 }
 if(@(Get-AutomaticCleanupFiles).Count){throw 'Running application files selected'}
+if(@(Get-CleanupCandidates Safe).Count){throw 'Quick selected running application files'}
+function Move-CleanupFileToRecycleBin {throw 'Running application files must never reach recycling'}
+Invoke-RecycleCleanup Safe
+if($script:OperationFailed){throw 'Skipping running applications was reported as a failure'}
 ''')
 
     def test_deep_cleanup_automates_old_temp_and_archived_reports_only(self):
