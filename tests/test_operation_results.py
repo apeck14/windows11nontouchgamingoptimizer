@@ -198,6 +198,21 @@ $null=Show-OperationSummary
         self.assertIn('Memory & security', session)
         self.assertIn('1 file | ~1.00 GB', session)
 
+    def test_console_hides_routine_details_and_colors_real_outcomes(self):
+        self.run_case(r'''
+$script:messages=@()
+function Write-Host {param($Object,$ForegroundColor) $script:messages+=,[pscustomobject]@{Text=[string]$Object;Color=[string]$ForegroundColor}}
+Write-OperationResult AlreadyConfigured 'HKCU\Noisy' 'already configured' $true
+Write-OperationResult Unsupported 'Service Missing' 'Not installed'
+Write-OperationResult Applied 'HKCU\Changed' 'registry details' $true
+Write-OperationResult Applied 'System restore point' 'checkpoint details' $true
+Write-OperationResult Failed 'Service sc stop ProtectedService' "sc.exe returned 5: Access is denied.`nRaw native dump"
+if($script:messages.Count -ne 2){throw 'Routine output was not suppressed'}
+if($script:messages[0].Color -ne 'Green' -or $script:messages[1].Color -ne 'Red'){throw 'Incorrect status colors'}
+if($script:messages[1].Text -notmatch 'ProtectedService' -or $script:messages[1].Text -match 'Raw native dump'){throw 'Error was not concise'}
+if((Get-Content -Raw $env:LOG_FILE) -notmatch 'Raw native dump'){throw 'Diagnostic log lost details'}
+''')
+
     def test_power_plan_creation_and_activation_are_read_back(self):
         rows, _ = self.run_case(r'''
 function Get-PowerCapabilities {@{ModernStandby=$false;Portable=$false}}

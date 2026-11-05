@@ -19,8 +19,23 @@ function Write-OperationResult {
     if (-not $env:OPTIMIZER_RESULTS) { throw 'Result journal is not configured.' }
     $entry | ConvertTo-Json -Compress -Depth 8 | Add-Content -LiteralPath $env:OPTIMIZER_RESULTS -Encoding UTF8
     $message = '[{0}] {1}: {2}' -f $Status.ToUpperInvariant(), $Operation, $Detail
-    Write-Host $message
     if ($env:LOG_FILE) { Add-Content -LiteralPath $env:LOG_FILE -Value $message -Encoding UTF8 }
+    if ($Status -eq 'Failed') {
+        $label = switch -Regex ($Operation) {
+            '^Service (?:sc (?:stop|start|config) )?"?([^"\s]+)' { 'Service '+$Matches[1]; break }
+            '^Recycle ' { 'Recycle '+[IO.Path]::GetFileName($Operation.Substring(8)); break }
+            '^Registry |^HK[CLU]' { 'Windows setting'; break }
+            '^Restore ' { 'Restore point'; break }
+            '^Native ' { 'System command'; break }
+            default { $Operation }
+        }
+        $reason = if ($Detail -match 'access.*denied|returned 5\b|0x80070005') {'Windows denied access.'}
+            elseif ($Detail -match 'read.back|did not match|not.*verified') {'Could not verify the change.'}
+            else {'Could not complete this change.'}
+        Write-Host ("[ERROR] {0}: {1} Details are in the log." -f $label,$reason) -ForegroundColor Red
+    } elseif ($Status -eq 'Applied' -and $Verified -and $Operation -in @('System restore point','AC power mode')) {
+        Write-Host ("[OK] {0}" -f $Operation) -ForegroundColor Green
+    }
 }
 
 function Split-OperationArguments {
@@ -315,8 +330,6 @@ function New-OptimizerRestorePoint {
         }
     }
     Write-OperationResult Applied 'System restore point' "Verified #$($point[0].SequenceNumber): $description. Open System Restore with menu R or rstrui.exe." $true
-    Write-Host 'System Protection is enabled on the Windows drive. Restore points can expire as Windows reclaims space.'
-    Write-Host 'System Restore is not a full backup: deleted files and every removed app are not guaranteed recoverable.'
 }
 
 function Enable-WindowedOptimizations {
@@ -332,7 +345,6 @@ function Enable-WindowedOptimizations {
     $parts = @($settings -split ';' | Where-Object { $_ -and $_ -notmatch '^\s*SwapEffectUpgradeEnable\s*=' })
     $wanted = (($parts + 'SwapEffectUpgradeEnable=1') -join ';') + ';'
     Invoke-RegistryChange @('reg','add',$path,'/v',$name,'/t','REG_SZ','/d',$wanted,'/f')
-    Write-Host 'Windowed optimization applies to compatible DX10/DX11 games. Restart affected games; use per-game Graphics settings for exceptions.'
 }
 
 function Set-MemoryIntegrity {
@@ -347,7 +359,7 @@ function Set-MemoryIntegrity {
     $wanted = [int]$Enable
     $before = Get-RegistryState $path 'Enabled'
     $running = 2 -in @((Get-CimInstance -Namespace root\Microsoft\Windows\DeviceGuard -ClassName Win32_DeviceGuard -ErrorAction Stop).SecurityServicesRunning)
-    Write-Host 'Disabling memory integrity reduces kernel protection and may prevent anti-cheat protected games from launching. Virtualization and other VBS services are not changed.'
+    if (-not $Enable) { Write-Host 'Memory integrity will be off: less protection; some anti-cheat systems may require it on.' -ForegroundColor Yellow }
     if (-not $before.Exists -or $before.Value -ne $wanted) {
         Invoke-RegistryChange @('reg','add',$path,'/v','Enabled','/t','REG_DWORD','/d',"$wanted",'/f')
         Write-OperationResult RestartRequired 'Memory integrity' "Saved Enabled=$wanted. Restart and check Windows Security before assuming the runtime state changed." $true
@@ -433,14 +445,14 @@ function Show-GraphicsConfiguration {
         } else { Write-OperationResult AlreadyConfigured "Display $($screen.Name)" $detail $true }
     }
     $gpus = @(Get-CimInstance Win32_VideoController -ErrorAction Stop)
-    Write-Host ('Detected graphics adapters: ' + (($gpus | ForEach-Object Name) -join ', '))
+    if (-not $env:OPTIMIZER_FULL_RUN) { Write-Host ('Detected graphics adapters: ' + (($gpus | ForEach-Object Name) -join ', ')) }
     $key = 'HKCU:\Software\Microsoft\DirectX\UserGpuPreferences'
     if (Test-Path -LiteralPath $key) {
         $preferences = Get-ItemProperty -LiteralPath $key -ErrorAction Stop
         foreach ($property in $preferences.PSObject.Properties) {
             if ($property.Name -match '\.exe$' -and $property.Value -match 'GpuPreference=([012]);?') {
                 $label = @('Windows default','power saving','high performance')[[int]$Matches[1]]
-                Write-Host ("GPU preference: {0} = {1}" -f $property.Name,$label)
+                if (-not $env:OPTIMIZER_FULL_RUN) { Write-Host ("GPU preference: {0} = {1}" -f $property.Name,$label) }
             }
         }
     }
@@ -521,7 +533,7 @@ function Show-OperationSummary {
     if ($env:OPTIMIZER_ACTION_ID) { $entries = @($entries | Where-Object Action -eq $env:OPTIMIZER_ACTION_ID) }
     if (-not $entries.Count) { Write-Host 'No operations recorded in this session.'; return 0 }
     $scope = if ($env:OPTIMIZER_ACTION_ID) {'this action'} else {'this session'}
-    Write-Host "`n========== SUMMARY - $scope =========="
+    Write-Host "`nSUMMARY - $scope" -ForegroundColor Cyan
     $changed = @($entries | Where-Object { $_.Verified -and $_.Status -in @('Applied','RestartRequired') })
     $areas = @($changed | Where-Object { $_.Operation -notlike 'Recycle *' -and $_.Operation -ne 'System restore point' } | ForEach-Object {
         switch -Regex ($_.Operation) {
@@ -534,27 +546,29 @@ function Show-OperationSummary {
             default {'Other Windows settings'}
         }
     } | Sort-Object -Unique)
-    if ($areas.Count) { Write-Host ('Updated: '+($areas -join '; ')) }
+    if ($areas.Count) { Write-Host ('Updated: '+($areas -join '; ')) -ForegroundColor Green }
     else { Write-Host 'No new configuration changes confirmed.' }
-    if (@($changed | Where-Object Operation -eq 'System restore point').Count) { Write-Host 'Restore point: created and verified. Use R to restore.' }
+    if (@($changed | Where-Object Operation -eq 'System restore point').Count) { Write-Host 'Restore point: created and verified. Use R to restore.' -ForegroundColor Green }
     $recycled = @($changed | Where-Object Operation -like 'Recycle *')
     if ($recycled.Count) {
         $gb = ($recycled | Measure-Object Bytes -Sum).Sum / 1GB
         $duplicates = @($recycled | Where-Object Duplicate -eq $true).Count
         $noun = if ($recycled.Count -eq 1) {'file'} else {'files'}
-        Write-Host ('Recycled: {0} {1} | ~{2:N2} GB | Duplicates: {3}' -f $recycled.Count,$noun,$gb,$duplicates)
+        Write-Host ('Recycled: {0} {1} | ~{2:N2} GB | Duplicates: {3}' -f $recycled.Count,$noun,$gb,$duplicates) -ForegroundColor Green
         Write-Host 'Space is still occupied in the Recycle Bin; empty it manually to free space.'
     } elseif (@($entries | Where-Object Operation -like 'Recycle *').Count) {
         Write-Host 'Recycled: no files.'
     }
-    if (@($entries | Where-Object Status -eq 'RestartRequired').Count) { Write-Host 'Restart: needed to finish applying some settings.' }
+    if (@($entries | Where-Object Status -eq 'RestartRequired').Count) { Write-Host 'Restart: needed to finish applying some settings.' -ForegroundColor Yellow }
     $failed = @($entries | Where-Object Status -eq 'Failed').Count
     $unverified = @($entries | Where-Object Status -eq 'Unverified').Count
     $skipped = @($entries | Where-Object Status -eq 'Unsupported').Count
-    if ($failed -or $unverified -or $skipped) { Write-Host ("Review: $failed failed; $unverified unverified; $skipped unavailable/skipped.") }
+    if ($failed -or $unverified) { Write-Host ("Review: $failed failed; $unverified unverified.") -ForegroundColor $(if ($failed) {'Red'} else {'Yellow'}) }
+    if ($skipped) { Write-Host ("Skipped: $skipped unavailable items (not errors).") -ForegroundColor DarkGray }
     Write-Host ('Details: '+$env:LOG_FILE)
-    if ($failed) { Write-Host 'PARTIAL RESULT - see the log for failures.'; return 1 }
-    if ($unverified -or @($entries | Where-Object Status -eq 'RestartRequired').Count) { Write-Host 'INCOMPLETE VERIFICATION - restart/review as noted above.'; return 2 }
+    if ($failed) { Write-Host 'PARTIAL RESULT - see the log for failures.' -ForegroundColor Red; return 1 }
+    if ($unverified -or @($entries | Where-Object Status -eq 'RestartRequired').Count) { Write-Host 'INCOMPLETE VERIFICATION - restart/review as noted above.' -ForegroundColor Yellow; return 2 }
+    Write-Host 'Completed.' -ForegroundColor Green
     return 0
 }
 

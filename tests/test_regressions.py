@@ -99,6 +99,12 @@ class Regressions(unittest.TestCase):
                 self.assertEqual(events[0], expected)
                 self.assertTrue(set(events) <= {expected, 'PauseReturn', 'Menu'})
 
+    def test_logging_is_file_only(self):
+        result, _, log = self.run_batch(routine('Log'), 'Log', args='"diagnostic detail"')
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('diagnostic detail', log)
+        self.assertNotIn('diagnostic detail', result.stdout)
+
     def test_registry_backup_runs_once_and_preserves_mouse_baseline(self):
         body = ':BackupTwice\ncall :BackupRegistryKeys\ncall :BackupRegistryKeys\nexit /b 0\n' + mock_commands(routine('BackupRegistryKeys'))
         for baseline_exists in [False, True]:

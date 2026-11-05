@@ -3,6 +3,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 
 set "SCRIPT_DIR=%~dp0"
 set "REGISTRY_BACKUP_DONE="
+set "OPTIMIZER_FULL_RUN="
 pushd "%SCRIPT_DIR%" >nul 2>&1
 
 title Windows 11 Non-Touch Gaming Optimizer - by Matt Hurley
@@ -89,9 +90,7 @@ if errorlevel 1 (
     exit /b 1
 )
 call :Log "Awaiting menu selection"
-echo.
 echo    %CLR_MENU%[1 / F]%CLR_RESET% FULL OPTIMIZATION - All gaming tweaks in one run
-echo.
 echo    %CLR_MENU%[3]%CLR_RESET% Set up protection and create restore point
 echo    %CLR_MENU%[R]%CLR_RESET% Open Windows System Restore
 echo    %CLR_MENU%[4]%CLR_RESET% Review installed apps (no uninstall)
@@ -105,7 +104,6 @@ echo    %CLR_MENU%[B]%CLR_RESET% Recycle user temporary files older than 30 days
 echo    %CLR_MENU%[C]%CLR_RESET% Advanced: GPU and storage optimizations
 echo    %CLR_MENU%[D]%CLR_RESET% Advanced: Audio latency reduction
 echo    %CLR_MENU%[E]%CLR_RESET% Optional: Disable Xbox services (breaks Game Bar)
-echo.
 echo    %CLR_MENU%[J]%CLR_RESET% Deeper cleanup - select files to recycle
 echo    %CLR_MENU%[G]%CLR_RESET% Check display refresh and GPU preferences
 echo    %CLR_MENU%[M]%CLR_RESET% Memory integrity on/off
@@ -114,7 +112,6 @@ echo    %CLR_MENU%[P]%CLR_RESET% View operation results
 echo    %CLR_MENU%[V]%CLR_RESET% Verify optimizations status
 echo    %CLR_MENU%[U]%CLR_RESET% UNDO - Partial rollback of key settings
 echo    %CLR_MENU%[0]%CLR_RESET% Exit
-echo.
 set "choice="
 set /p "choice=> "
 set "choice=%choice:~0,1%"
@@ -143,62 +140,49 @@ if /I "%choice%"=="P" (call :ShowChangesSummary & call :PauseReturn & goto Menu)
 if /I "%choice%"=="V" (call :VerifyOptimizations & call :PauseReturn & goto Menu)
 if /I "%choice%"=="U" (call :UndoChanges & call :PauseReturn & goto Menu)
 if "%choice%"=="0" goto End
-echo.
 echo [!] Unknown selection. Please try again.
 call :PauseReturn
 goto Menu
 
 :FullOptimization
 call :Log "Running FULL optimization sequence"
-echo.
-echo ========================================================================
-echo   %CLR_TITLE%FULL GAMING OPTIMIZATION%CLR_RESET%
-echo ========================================================================
+if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%FULL GAMING OPTIMIZATION%CLR_RESET%
 echo   This will apply ALL gaming optimizations for maximum performance.
 echo   %CLR_WARNING%Estimated time: 5-10 minutes%CLR_RESET%
-echo ========================================================================
-echo.
 call :WarnIfOnBattery
 if errorlevel 1 exit /b 1
 call :PrepareOptimization
 if errorlevel 1 exit /b 1
-echo.
-echo [*] Step 1/15: Reviewing installed apps...
-call :Debloat
-echo [*] Step 2/15: Disabling touch/pen components...
+set "OPTIMIZER_FULL_RUN=1"
+echo [*] Step 1/13: Disabling touch/pen components...
 call :DisableTouchFeatures
-echo [*] Step 3/15: Applying gaming tweaks...
+echo [*] Step 2/13: Applying gaming tweaks...
 call :ApplyGamingTweaks
-echo [*] Step 4/15: Optimizing services and telemetry...
+echo [*] Step 3/13: Optimizing services and telemetry...
 call :OptimizeServices
-echo [*] Step 5/15: Applying network optimizations...
+echo [*] Step 4/13: Applying network optimizations...
 call :ApplyNetworkTweaks
-echo [*] Step 6/15: Optimizing visual effects...
+echo [*] Step 5/13: Optimizing visual effects...
 call :DisableAnimations
-echo [*] Step 7/15: Optimizing startup...
+echo [*] Step 6/13: Optimizing startup...
 call :OptimizeStartup
-echo [*] Step 8/15: Recycling old temporary files...
+echo [*] Step 7/13: Recycling old temporary files...
 call :FreeDiskSpace
-echo [*] Step 9/15: GPU and storage optimizations...
+echo [*] Step 8/13: GPU and storage optimizations...
 set "AUTO_ADVANCED_CONFIRM=1"
 call :AdvancedGPUStorage
 set "AUTO_ADVANCED_CONFIRM="
-echo [*] Step 10/15: Audio latency reduction...
+echo [*] Step 9/13: Audio latency reduction...
 call :OptimizeAudio
-echo [*] Step 11/15: Finalizing memory optimizations...
+echo [*] Step 10/13: Finalizing memory optimizations...
 call :OptimizeMemory
-echo [*] Step 12/15: Optimizing page file...
+echo [*] Step 11/13: Optimizing page file...
 call :OptimizePageFile
-echo [*] Step 13/15: Disabling CPU core parking...
+echo [*] Step 12/13: Disabling CPU core parking...
 call :DisableCoreParking
-echo [*] Step 14/15: Tuning storage-specific settings...
+echo [*] Step 13/13: Tuning storage-specific settings...
 call :OptimizeStorageByType
-echo [*] Step 15/15: Reviewing results...
-echo.
-echo ========================================================================
-echo   %CLR_SUCCESS%FULL OPTIMIZATION ATTEMPTS FINISHED - REVIEW RESULTS%CLR_RESET%
-echo   Please %CLR_WARNING%RESTART%CLR_RESET% your device for all changes to take effect.
-echo ========================================================================
+set "OPTIMIZER_FULL_RUN="
 call :Log "Full optimization attempts finished; review operation results"
 call :ShowChangesSummary
 exit /b %errorlevel%
@@ -206,7 +190,6 @@ exit /b %errorlevel%
 :PrepareOptimization
 call :CreateRestorePoint
 if not errorlevel 1 exit /b 0
-echo.
 echo [!] A new restore point is unavailable. You can still apply the tweaks.
 choice /c YN /n /d N /t 30 /m "Continue without a new restore point? (Y/N, default=N): "
 if not "%errorlevel%"=="1" (
@@ -218,15 +201,14 @@ exit /b 0
 
 :CreateRestorePoint
 call :Log "Creating system restore point"
-echo.
-echo [*] Checking restore point prerequisites...
+if not defined OPTIMIZER_FULL_RUN echo [*] Checking restore point prerequisites...
 call :EnsureShadowServices
 if errorlevel 1 (
     echo [!] Required System Restore services are unavailable. No optimizations applied.
     call :Log "Restore point prerequisites missing"
     exit /b 1
 )
-echo [*] Enabling System Protection and creating a verified restore point...
+if not defined OPTIMIZER_FULL_RUN echo [*] Enabling System Protection and creating a verified restore point...
 call :RunOperation Restore Create
 if errorlevel 1 (
     echo [!] No new restore point was verified. Check the log for the exact error.
@@ -239,12 +221,8 @@ exit /b 0
 
 :ApplyNetworkTweaksSafe
 call :Log "Applying SAFE network tweaks"
-echo.
-echo ========================================================================
-echo   %CLR_TITLE%APPLYING SAFE NETWORK OPTIMIZATIONS%CLR_RESET%
-echo ========================================================================
-echo.
-echo [*] Applying low-risk tweaks for gaming (keeps Windows TCP defaults)...
+if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%APPLYING SAFE NETWORK OPTIMIZATIONS%CLR_RESET%
+if not defined OPTIMIZER_FULL_RUN echo [*] Applying low-risk tweaks for gaming (keeps Windows TCP defaults)...
 REM Restore normal receive-window growth, including after older Full runs.
 call :RunOperation Native netsh interface tcp set global autotuninglevel=normal
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpNoDelay /t REG_DWORD /d 1 /f
@@ -259,9 +237,6 @@ for %%T in ("\Microsoft\Windows\Delivery Optimization\Maintenance" "\Microsoft\W
 call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" /v DODownloadMode /t REG_DWORD /d 0 /f
 
 call :Log "Safe network changes attempted; see results"
-echo.
-echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
-echo     Log: %LOG_FILE%
 exit /b 0
 
 :Debloat
@@ -270,12 +245,8 @@ exit /b %errorlevel%
 
 :DisableTouchFeatures
 call :Log "Disabling touch/pen stack"
-echo.
-echo ========================================================================
-echo   %CLR_TITLE%DISABLING TOUCH/PEN FEATURES%CLR_RESET%
-echo ========================================================================
-echo.
-echo [*] Disabling touchscreen, pen, handwriting, and touch keyboard components...
+if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%DISABLING TOUCH/PEN FEATURES%CLR_RESET%
+if not defined OPTIMIZER_FULL_RUN echo [*] Disabling touchscreen, pen, handwriting, and touch keyboard components...
 for %%S in (TabletInputService TextInputManagementService TouchInput WTabletServiceCon WTabletServicePen PenService TabletInputHost) do (
     call :RunOperation Service sc stop %%S
     call :RunOperation Service sc config %%S start= disabled
@@ -292,9 +263,6 @@ call :RunOperation Feature Disable "InkAndHandwritingServices"
 call :RunOperation Registry reg add "HKCU\Software\Microsoft\Wisp\Pen\SysEventParameters" /v FlicksEnabled /t REG_DWORD /d 0 /f
 call :RunOperation Registry reg add "HKCU\Software\Microsoft\Wisp\Touch" /v TouchGate /t REG_DWORD /d 0 /f
 call :Log "Touch/pen changes attempted; see results"
-echo.
-echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
-echo     Log: %LOG_FILE%
 exit /b 0
 
 :MemoryIntegrityMenu
@@ -319,13 +287,9 @@ call :RunOperation Windowed Enable
 call :RunOperation Integrity Off
 call :RunOperation Graphics Check
 call :Log "Applying gaming tweaks"
-echo.
-echo %CLR_TITLE%  ======================================================================%CLR_RESET%
-echo %CLR_TITLE%  ^|                 GAMING PERFORMANCE TWEAKS                         ^|%CLR_RESET%
-echo %CLR_TITLE%  ======================================================================%CLR_RESET%
-echo.
+if not defined OPTIMIZER_FULL_RUN echo %CLR_TITLE%  ^|                 GAMING PERFORMANCE TWEAKS                         ^|%CLR_RESET%
 if not defined DVR_PREF_SET (
-    echo [*] Disable Game DVR recording for gaming performance; Game Bar stays installed.
+    if not defined OPTIMIZER_FULL_RUN echo [*] Disable Game DVR recording for gaming performance; Game Bar stays installed.
     choice /c YN /n /d Y /t 5 /m "Disable Game DVR recording? (Y/N, default=Y): "
     if "!errorlevel!"=="1" (
         set "DISABLE_DVR=1"
@@ -335,10 +299,10 @@ if not defined DVR_PREF_SET (
     set "DVR_PREF_SET=1"
 )
 call :Log "Gaming tweaks: power plan"
-echo [*] Applying the performance power setting supported by this hardware...
+if not defined OPTIMIZER_FULL_RUN echo [*] Applying the performance power setting supported by this hardware...
 call :RunOperation Plan Ultimate
 
-echo [*] Tuning Game Mode, GPU scheduling, and visual effects...
+if not defined OPTIMIZER_FULL_RUN echo [*] Tuning Game Mode, GPU scheduling, and visual effects...
 call :RunOperation Registry reg add "HKCU\Software\Microsoft\GameBar" /v AllowAutoGameMode /t REG_DWORD /d 1 /f
 call :RunOperation Registry reg add "HKCU\Software\Microsoft\GameBar" /v AutoGameModeEnabled /t REG_DWORD /d 1 /f
 if "%DISABLE_DVR%"=="1" (
@@ -359,18 +323,18 @@ call :RunOperation Registry reg add "HKCU\Control Panel\Desktop" /v WaitToKillAp
 call :RunOperation Registry reg add "HKCU\Control Panel\Desktop" /v HungAppTimeout /t REG_SZ /d 1000 /f
 call :Log "Gaming tweaks: scheduler priorities"
 
-echo [*] Prioritizing multimedia + game scheduler values...
+if not defined OPTIMIZER_FULL_RUN echo [*] Prioritizing multimedia + game scheduler values...
 call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" /v NetworkThrottlingIndex /t REG_DWORD /d 4294967295 /f
 call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" /v SystemResponsiveness /t REG_DWORD /d 10 /f
 call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "Scheduling Category" /t REG_SZ /d "High" /f
 
 call :Log "Gaming tweaks: latency + input"
 
-echo [*] Optimizing for low latency and high throughput...
+if not defined OPTIMIZER_FULL_RUN echo [*] Optimizing for low latency and high throughput...
 call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "Latency Sensitive" /t REG_SZ /d "True" /f
 call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "NoLazyMode" /t REG_DWORD /d 1 /f
 
-echo [*] Optimizing mouse and keyboard input for gaming...
+if not defined OPTIMIZER_FULL_RUN echo [*] Optimizing mouse and keyboard input for gaming...
 call :RunOperation Registry reg add "HKCU\Control Panel\Mouse" /v MouseSpeed /t REG_SZ /d 0 /f
 call :RunOperation Registry reg add "HKCU\Control Panel\Mouse" /v MouseThreshold1 /t REG_SZ /d 0 /f
 call :RunOperation Registry reg add "HKCU\Control Panel\Mouse" /v MouseThreshold2 /t REG_SZ /d 0 /f
@@ -378,17 +342,17 @@ call :RunOperation Registry reg add "HKCU\Control Panel\Mouse" /v MouseSensitivi
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\mouclass\Parameters" /v MouseDataQueueSize /t REG_DWORD /d 20 /f
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\kbdclass\Parameters" /v KeyboardDataQueueSize /t REG_DWORD /d 20 /f
 
-echo [*] Enabling full Game Mode stack...
+if not defined OPTIMIZER_FULL_RUN echo [*] Enabling full Game Mode stack...
 call :RunOperation Registry reg add "HKCU\Software\Microsoft\GameBar" /v UseNexusForGameBarEnabled /t REG_DWORD /d 0 /f
 
-echo [*] Restoring automatic Windows timer selection...
+if not defined OPTIMIZER_FULL_RUN echo [*] Restoring automatic Windows timer selection...
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\kernel" /v GlobalTimerResolutionRequests /t REG_DWORD /d 1 /f
 REM Remove legacy debug timer overrides instead of forcing platform timers.
 for %%B in (useplatformclock disabledynamictick) do (
     call :RunOperation Native bcdedit /deletevalue %%B
 )
 
-echo [*] Prioritizing foreground apps (games) over background tasks...
+if not defined OPTIMIZER_FULL_RUN echo [*] Prioritizing foreground apps (games) over background tasks...
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\PriorityControl" /v Win32PrioritySeparation /t REG_DWORD /d 38 /f
 call :Log "Gaming tweaks: telemetry disable"
 
@@ -396,28 +360,21 @@ call :RunOperation Service sc stop "DiagTrack"
 call :RunOperation Service sc config "DiagTrack" start= disabled
 
 call :Log "Gaming changes attempted; see results"
-echo.
-echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
 if /I "%GPU_VENDOR%"=="NVIDIA" (
-    echo     %CLR_WARNING%Tip:%CLR_RESET% Open NVIDIA Control Panel ^> Low Latency Mode = Ultra
+    if not defined OPTIMIZER_FULL_RUN echo     %CLR_WARNING%Tip:%CLR_RESET% Open NVIDIA Control Panel ^> Low Latency Mode = Ultra
 )
 if /I "%GPU_VENDOR%"=="AMD Radeon" (
-    echo     %CLR_WARNING%Tip:%CLR_RESET% Open AMD Software ^> Anti-Lag = Enabled
+    if not defined OPTIMIZER_FULL_RUN echo     %CLR_WARNING%Tip:%CLR_RESET% Open AMD Software ^> Anti-Lag = Enabled
 )
 if /I "%GPU_VENDOR%"=="Intel Arc" (
-    echo     %CLR_WARNING%Tip:%CLR_RESET% Open Intel Graphics Command Center for game optimizations
+    if not defined OPTIMIZER_FULL_RUN echo     %CLR_WARNING%Tip:%CLR_RESET% Open Intel Graphics Command Center for game optimizations
 )
-echo     Log: %LOG_FILE%
 exit /b 0
 
 :OptimizeServices
 call :Log "Optimizing services/indexing"
-echo.
-echo ========================================================================
-echo   %CLR_TITLE%OPTIMIZING SERVICES AND TELEMETRY%CLR_RESET%
-echo ========================================================================
-echo.
-echo [*] Reducing background services, indexing, telemetry, and tips...
+if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%OPTIMIZING SERVICES AND TELEMETRY%CLR_RESET%
+if not defined OPTIMIZER_FULL_RUN echo [*] Reducing background services, indexing, telemetry, and tips...
 for %%S in (SysMain WSearch DiagTrack dmwappushservice RetailDemo RemoteRegistry MapsBroker TrkWks) do (
     call :RunOperation Service sc stop %%S
     call :RunOperation Service sc config %%S start= disabled
@@ -448,18 +405,12 @@ call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVers
 call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\CloudContent" /v DisableSoftLanding /t REG_DWORD /d 1 /f
 call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\CloudContent" /v DisableWindowsSpotlightFeatures /t REG_DWORD /d 1 /f
 call :Log "Service/telemetry attempts finished; see results"
-echo.
-echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
-echo     Log: %LOG_FILE%
 exit /b 0
 
 :NetworkMenu
 :NetworkOptions
 cls
-echo ========================================================================
-echo   %CLR_TITLE%NETWORK OPTIMIZATION MENU%CLR_RESET%
-echo ========================================================================
-echo.
+if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%NETWORK OPTIMIZATION MENU%CLR_RESET%
 echo    %CLR_MENU%[1]%CLR_RESET% Apply SAFE network tweaks
 echo    %CLR_MENU%[2]%CLR_RESET% Apply AGGRESSIVE tweaks - may affect VPN/throughput
 echo    %CLR_MENU%[3]%CLR_RESET% Revert network tweaks to defaults
@@ -475,12 +426,8 @@ goto NetworkOptions
 
 :ApplyNetworkTweaks
 call :Log "Applying network tweaks"
-echo.
-echo ========================================================================
-echo   %CLR_TITLE%APPLYING NETWORK OPTIMIZATIONS%CLR_RESET%
-echo ========================================================================
-echo.
-echo [*] Applying safe TCP/IP and bandwidth tweaks for gaming...
+if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%APPLYING NETWORK OPTIMIZATIONS%CLR_RESET%
+if not defined OPTIMIZER_FULL_RUN echo [*] Applying safe TCP/IP and bandwidth tweaks for gaming...
 call :RunOperation Native netsh interface tcp set global autotuninglevel=normal
 call :RunOperation Native netsh interface tcp set global ecncapability=disabled
 call :RunOperation Native netsh interface tcp set global rss=enabled
@@ -503,19 +450,12 @@ call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\De
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces" /v TcpAckFrequency /t REG_DWORD /d 1 /f
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces" /v TCPNoDelay /t REG_DWORD /d 1 /f
 call :Log "Network changes attempted; see results"
-echo.
-echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
-echo     Log: %LOG_FILE%
 exit /b 0
 
 :RevertNetworkTweaks
 call :Log "Reverting network tweaks"
-echo.
-echo ========================================================================
-echo   %CLR_TITLE%REVERTING NETWORK TWEAKS%CLR_RESET%
-echo ========================================================================
-echo.
-echo [*] Reverting network-related tweaks to Windows defaults...
+if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%REVERTING NETWORK TWEAKS%CLR_RESET%
+if not defined OPTIMIZER_FULL_RUN echo [*] Reverting network-related tweaks to Windows defaults...
 call :RunOperation Native netsh interface tcp set global autotuninglevel=normal
 call :RunOperation Native netsh interface tcp set global ecncapability=default
 call :RunOperation Native netsh interface tcp set global rss=enabled
@@ -535,42 +475,29 @@ for %%V in (DODownloadMode DOMaxUploadBandwidth DOMaxUploadPercentage) do (
 call :RunOperation Registry reg delete "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces" /v TcpAckFrequency /f
 call :RunOperation Registry reg delete "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces" /v TCPNoDelay /f
 call :Log "Network reset attempted; see results"
-echo.
-echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
-echo     Log: %LOG_FILE%
 exit /b 0
 
 :DisableAnimations
 call :Log "Animations menu"
-echo.
-echo ========================================================================
-echo   %CLR_TITLE%VISUAL EFFECTS OPTIMIZATION%CLR_RESET%
-echo ========================================================================
-echo.
+if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%VISUAL EFFECTS OPTIMIZATION%CLR_RESET%
 echo   Your system has capable hardware. Choose your preference:
-echo.
 echo   %CLR_MENU%[1]%CLR_RESET% BALANCED (Recommended) - Keep smooth animations, disable extras
 echo       Keeps: Window animations, taskbar effects, transparency
 echo       Disables: Aero Peek, thumbnail previews, listview effects
-echo.
 echo   %CLR_MENU%[2]%CLR_RESET% MINIMAL - Disable most animations for max FPS
 echo       Disables most visual effects for raw performance
-echo.
 echo   %CLR_MENU%[3]%CLR_RESET% SKIP - Keep current Windows settings
-echo.
 choice /c 123 /n /d 1 /t 15 /m "Select option (auto-selects Balanced in 15s): "
 set "ANIM_CHOICE=%errorlevel%"
 
 if "%ANIM_CHOICE%"=="3" (
-    echo.
-    echo [*] Skipping visual effects changes.
+    if not defined OPTIMIZER_FULL_RUN echo [*] Skipping visual effects changes.
     call :Log "User skipped animation changes"
     exit /b 0
 )
 
 if "%ANIM_CHOICE%"=="1" (
-    echo.
-    echo [*] Applying BALANCED visual settings...
+    if not defined OPTIMIZER_FULL_RUN echo [*] Applying BALANCED visual settings...
     REM Keep animations but disable extras
     call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarAnimations /t REG_DWORD /d 1 /f
     call :RunOperation Registry reg add "HKCU\Control Panel\Desktop\WindowMetrics" /v MinAnimate /t REG_SZ /d 1 /f
@@ -584,11 +511,9 @@ if "%ANIM_CHOICE%"=="1" (
     REM Keep transparency and smooth scrolling
     call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 1 /f
     call :Log "Balanced visual settings attempted; see results"
-    echo.
-    echo [*] Balanced visuals requested. Review the verified operation results.
+    if not defined OPTIMIZER_FULL_RUN echo [*] Balanced visuals requested. Review the verified operation results.
 ) else (
-    echo.
-    echo [*] Applying MINIMAL visual settings for max FPS...
+    if not defined OPTIMIZER_FULL_RUN echo [*] Applying MINIMAL visual settings for max FPS...
     call :RunOperation Registry reg add "HKCU\Control Panel\Desktop\WindowMetrics" /v MinAnimate /t REG_SZ /d 0 /f
     call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarAnimations /t REG_DWORD /d 0 /f
     call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" /v VisualFXSetting /t REG_DWORD /d 3 /f
@@ -602,21 +527,15 @@ if "%ANIM_CHOICE%"=="1" (
     call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarDa /t REG_DWORD /d 0 /f
     call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 0 /f
     call :Log "Minimal visual settings attempted; see results"
-    echo.
-    echo [*] Minimal visuals requested. Review the verified operation results.
+    if not defined OPTIMIZER_FULL_RUN echo [*] Minimal visuals requested. Review the verified operation results.
     echo     Restart Explorer for immediate effect: taskkill /f /im explorer.exe ^& start explorer.exe
 )
-echo     Log: %LOG_FILE%
 exit /b 0
 
 :OptimizeStartup
 call :Log "Optimizing startup"
-echo.
-echo ========================================================================
-echo   %CLR_TITLE%OPTIMIZING STARTUP PROGRAMS%CLR_RESET%
-echo ========================================================================
-echo.
-echo [*] Reducing startup delays and disabling unnecessary startup items...
+if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%OPTIMIZING STARTUP PROGRAMS%CLR_RESET%
+if not defined OPTIMIZER_FULL_RUN echo [*] Reducing startup delays and disabling unnecessary startup items...
 call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize" /v StartupDelayInMSec /t REG_DWORD /d 0 /f
 call :RunOperation Task schtasks /Change /TN "\Microsoft\Windows\Application Experience\StartupAppTask" /Disable
 call :RunOperation Task schtasks /Change /TN "\Microsoft\Windows\Application Experience\PcaPatchDbTask" /Disable
@@ -627,9 +546,6 @@ call :RunOperation Feature Disable "Printing-XPSServices-Features"
 call :RunOperation Feature Disable "WorkFolders-Client"
 call :RunOperation Feature Disable "FaxServicesClientPackage"
 call :Log "Startup changes attempted; see results"
-echo.
-echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
-echo     Log: %LOG_FILE%
 exit /b 0
 
 :FreeDiskSpace
@@ -639,7 +555,7 @@ exit /b %errorlevel%
 
 :OptimizeMemory
 call :Log "Optimizing memory"
-echo [*] Enabling memory compression and optimizing paging...
+if not defined OPTIMIZER_FULL_RUN echo [*] Enabling memory compression and optimizing paging...
 if defined RAM_GB (
     if %RAM_GB% LSS 8 (
         echo     %CLR_WARNING%[!] WARNING: Low RAM detected ^(%RAM_GB%GB^). DisablePagingExecutive may cause instability.%CLR_RESET%
@@ -661,7 +577,7 @@ exit /b %errorlevel%
 
 :DisableCoreParking
 call :Log "Disabling CPU core parking"
-echo [*] Disabling CPU core parking for better gaming performance...
+if not defined OPTIMIZER_FULL_RUN echo [*] Disabling CPU core parking for better gaming performance...
 REM Extract the actual GUID from powercfg output (format: "Power Scheme GUID: 12345678-1234-...")
 for /f "tokens=4" %%G in ('powercfg /getactivescheme 2^>nul ^| findstr "GUID"') do set "SCHEME_GUID=%%G"
 if not defined SCHEME_GUID (
@@ -675,7 +591,7 @@ exit /b 0
 
 :OptimizeStorageByType
 call :Log "Optimizing storage by type: %STORAGE_TYPE%"
-echo [*] Applying storage-specific optimizations...
+if not defined OPTIMIZER_FULL_RUN echo [*] Applying storage-specific optimizations...
 if /I "%STORAGE_TYPE%"=="SSD" (
     echo     Storage: SSD detected - Optimizing for solid state
     call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v NtfsDisableLastAccessUpdate /t REG_DWORD /d 1 /f
@@ -699,22 +615,17 @@ exit /b 0
 
 :AdvancedGPUStorage
 call :Log "Applying GPU and storage optimizations"
-echo.
-echo ========================================================================
-echo   %CLR_TITLE%ADVANCED GPU AND STORAGE OPTIMIZATIONS%CLR_RESET%
-echo ========================================================================
-echo.
+if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%ADVANCED GPU AND STORAGE OPTIMIZATIONS%CLR_RESET%
 if not "%AUTO_ADVANCED_CONFIRM%"=="1" (
     set "advConfirm="
     set /p "advConfirm=These tweaks are aggressive and hardware-dependent. Continue? (Y/N): "
     if /I not "!advConfirm!"=="Y" (
-        echo.
         echo [!] Advanced GPU/storage optimizations skipped.
         call :Log "User skipped advanced GPU/storage tweaks"
         exit /b 0
     )
 )
-echo [*] Applying GPU optimizations (NVIDIA/AMD agnostic)...
+if not defined OPTIMIZER_FULL_RUN echo [*] Applying GPU optimizations (NVIDIA/AMD agnostic)...
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultD3TransitionLatencyActivelyUsed /t REG_DWORD /d 0 /f
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultD3TransitionLatencyIdleLongTime /t REG_DWORD /d 1 /f
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultD3TransitionLatencyIdleMonitorOff /t REG_DWORD /d 1 /f
@@ -738,67 +649,49 @@ call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\Graph
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v MonitorRefreshLatencyTolerance /t REG_DWORD /d 1 /f
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v TransitionLatency /t REG_DWORD /d 1 /f
 
-echo [*] Optimizing storage for SSDs and gaming drives...
+if not defined OPTIMIZER_FULL_RUN echo [*] Optimizing storage for SSDs and gaming drives...
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v NtfsDisableLastAccessUpdate /t REG_DWORD /d 1 /f
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v NtfsDisable8dot3NameCreation /t REG_DWORD /d 1 /f
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v DontVerifyRandomDrivers /t REG_DWORD /d 1 /f
 call :RunOperation Native fsutil behavior set DisableDeleteNotify 0
 
-echo [*] Optimizing process priorities...
+if not defined OPTIMIZER_FULL_RUN echo [*] Optimizing process priorities...
 call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\DisplayPostProcessing" /v "Scheduling Category" /t REG_SZ /d "High" /f
 
 call :Log "GPU/storage changes attempted; see results"
-echo.
-echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
-echo     %CLR_WARNING%Note:%CLR_RESET% For NVIDIA GPUs, also set Low Latency Mode in NVIDIA Control Panel.
-echo     %CLR_WARNING%Note:%CLR_RESET% For AMD GPUs, enable Anti-Lag in AMD Software.
-echo     Log: %LOG_FILE%
+if not defined OPTIMIZER_FULL_RUN echo     %CLR_WARNING%Note:%CLR_RESET% For NVIDIA GPUs, also set Low Latency Mode in NVIDIA Control Panel.
+if not defined OPTIMIZER_FULL_RUN echo     %CLR_WARNING%Note:%CLR_RESET% For AMD GPUs, enable Anti-Lag in AMD Software.
 exit /b 0
 
 :OptimizeAudio
 call :Log "Optimizing audio latency"
-echo.
-echo ========================================================================
-echo   %CLR_TITLE%AUDIO LATENCY REDUCTION%CLR_RESET%
-echo ========================================================================
-echo.
-echo [*] Reducing audio latency for gaming and streaming...
+if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%AUDIO LATENCY REDUCTION%CLR_RESET%
+if not defined OPTIMIZER_FULL_RUN echo [*] Reducing audio latency for gaming and streaming...
 call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio" /v "Scheduling Category" /t REG_SZ /d "High" /f
 call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio" /v "Scheduling Category" /t REG_SZ /d "High" /f
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\AudioSrv" /v DependOnService /t REG_MULTI_SZ /d "AudioEndpointBuilder\0RpcSs" /f
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Audiosrv" /v Start /t REG_DWORD /d 2 /f
 
 call :Log "Audio changes attempted; see results"
-echo.
-echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
-echo     %CLR_WARNING%Tip:%CLR_RESET% In Sound settings, enable Exclusive Mode for gaming headset.
-echo     Log: %LOG_FILE%
+if not defined OPTIMIZER_FULL_RUN echo     %CLR_WARNING%Tip:%CLR_RESET% In Sound settings, enable Exclusive Mode for gaming headset.
 exit /b 0
 
 :DisableXboxServices
 call :Log "Disabling Xbox services"
-echo.
-echo ========================================================================
-echo   %CLR_TITLE%DISABLE XBOX SERVICES%CLR_RESET%
-echo ========================================================================
-echo.
+if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%DISABLE XBOX SERVICES%CLR_RESET%
 echo   %CLR_WARNING%WARNING:%CLR_RESET% This will disable:
 echo   - Xbox Game Bar (Win+G)
 echo   - Xbox app and Game Pass integration
 echo   - Xbox Live cloud saves
 echo   - Some Xbox controller features
-echo.
 echo   Only proceed if you DON'T use these features!
-echo.
 set /p "confirm=Type YES to disable Xbox services: "
 if /I not "!confirm!"=="YES" (
-    echo.
     echo [!] Xbox services NOT disabled (user cancelled).
     call :Log "User cancelled Xbox service disable"
     exit /b 0
 )
-echo.
-echo [*] Disabling Xbox-related services...
+if not defined OPTIMIZER_FULL_RUN echo [*] Disabling Xbox-related services...
 call :RunOperation Service sc stop "XblAuthManager"
 call :RunOperation Service sc config "XblAuthManager" start= disabled
 call :RunOperation Service sc stop "XblGameSave"
@@ -810,17 +703,13 @@ call :RunOperation Service sc config "XboxNetApiSvc" start= disabled
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\xbgm" /v Start /t REG_DWORD /d 4 /f
 
 call :Log "Xbox service changes attempted; see results"
-echo.
-echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
 echo     To re-enable, use the UNDO option or run:
 echo     sc config XblAuthManager start= demand
 echo     sc config XblGameSave start= demand
-echo     Log: %LOG_FILE%
 exit /b 0
 
 
 :ShowHelp
-echo.
 echo Full optimization attempts a restore point before making changes.
 echo Individual actions do not create a restore point automatically. File cleanup only recycles.
 echo Review [P] Operation results for failures and restart requirements.
@@ -828,7 +717,6 @@ echo [V] checks selected live settings; it is not a performance score.
 echo Spotify is preserved. Xbox services change only if you choose [E].
 echo [U] is a partial reset, not a restoration of your original settings.
 echo Deleted files and removed apps cannot be recovered with [U].
-echo.
 echo Full documentation: %SCRIPT_DIR%README.md
 echo Log files: %LOG_DIR%
 exit /b 0
@@ -840,12 +728,8 @@ echo     Remote Registry and Routing/Remote Access will not be enabled.
 choice /c YN /n /d N /t 15 /m "Apply partial rollback defaults? (Y/N, default=N): "
 if not "%errorlevel%"=="1" exit /b 1
 call :Log "Undo routine requested"
-echo.
-echo ========================================================================
-echo   %CLR_TITLE%REVERTING CHANGES%CLR_RESET%
-echo ========================================================================
-echo.
-echo [*] Attempting to revert services, registry settings, and network changes...
+if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%REVERTING CHANGES%CLR_RESET%
+if not defined OPTIMIZER_FULL_RUN echo [*] Attempting to revert services, registry settings, and network changes...
 for %%S in (TabletInputService TextInputManagementService TouchInput WTabletServiceCon WTabletServicePen PenService TabletInputHost SysMain WSearch DiagTrack dmwappushservice RetailDemo MapsBroker TrkWks DoSvc XblAuthManager XblGameSave XboxGipSvc XboxNetApiSvc) do (
     call :RunOperation Service sc config %%S start= demand
     call :RunOperation Service sc start %%S
@@ -890,8 +774,7 @@ if not defined MOUSE_RESTORED (
     call :RunOperation Registry reg add "HKCU\Control Panel\Mouse" /v MouseThreshold2 /t REG_SZ /d 10 /f
 )
 call :Log "Undo routine completed"
-echo.
-echo [*] Partial rollback attempted. Check the log; this is not a complete restore.
+if not defined OPTIMIZER_FULL_RUN echo [*] Partial rollback attempted. Check the log; this is not a complete restore.
 echo     Check %LOG_FILE% for details. %CLR_WARNING%Restart recommended.%CLR_RESET%
 exit /b 0
 
@@ -989,13 +872,8 @@ if defined ENSURE_SHADOW_ERROR (
 exit /b 0
 
 :Banner
-echo %CLR_TITLE%  ================================================================%CLR_RESET%
-echo %CLR_TITLE%                                                                  %CLR_RESET%
-echo %CLR_TITLE%           WINDOWS 11 GAMING OPTIMIZER v2.5                      %CLR_RESET%
-echo %CLR_TITLE%                                                                  %CLR_RESET%
-echo %CLR_TITLE%  ================================================================%CLR_RESET%
+if not defined OPTIMIZER_FULL_RUN echo %CLR_TITLE%           WINDOWS 11 GAMING OPTIMIZER v2.5                      %CLR_RESET%
 echo %CLR_SUBTITLE%                         by Matt Hurley%CLR_RESET%
-echo %CLR_SUBTITLE%  ----------------------------------------------------------------%CLR_RESET%
 echo   %CLR_SUCCESS%[*]%CLR_RESET% Maximize FPS ^| Reduce Latency ^| Optimize Performance
 if defined GPU_VENDOR echo   %CLR_SUCCESS%[*]%CLR_RESET% Detected GPU: %GPU_VENDOR%
 if defined CPU_VENDOR echo   %CLR_SUCCESS%[*]%CLR_RESET% Detected CPU: %CPU_VENDOR%
@@ -1004,12 +882,10 @@ if "%IS_LAPTOP%"=="1" echo   %CLR_WARNING%[!]%CLR_RESET% System Type: %CHASSIS_T
 echo   %CLR_WARNING%[!]%CLR_RESET% Run as administrator. Changes logged to:
 echo       %LOG_FILE%
 echo   %CLR_SUBTITLE%[H] Help/README ^| [P] Report ^| [V] Verify ^| [U] Undo%CLR_RESET%
-echo %CLR_TITLE%  ================================================================%CLR_RESET%
 exit /b 0
 
 :PauseReturn
 if defined OPTIMIZER_RESULTS if not defined RESULT_SUMMARY_SHOWN call :ShowChangesSummary
-echo.
 pause
 exit /b 0
 
@@ -1030,7 +906,7 @@ if defined RELAUNCHED (
     pause
     exit /b 1
 )
-echo [*] Requesting administrator approval via UAC...
+if not defined OPTIMIZER_FULL_RUN echo [*] Requesting administrator approval via UAC...
 set "OPTIMIZER_SCRIPT=%~f0"
 "%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "$p=Start-Process -FilePath $env:OPTIMIZER_SCRIPT -ArgumentList '-Elevated' -WorkingDirectory $env:SCRIPT_DIR -Verb RunAs -PassThru; exit 0" >nul 2>&1
 if errorlevel 1 (
@@ -1038,7 +914,7 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-echo [*] An elevated window is launching. Close this one if prompted.
+if not defined OPTIMIZER_FULL_RUN echo [*] An elevated window is launching. Close this one if prompted.
 timeout /t 2 /nobreak >nul
 exit /b 2
 
@@ -1073,25 +949,18 @@ if defined CHASSIS_CODE (
 )
 call :Log "Chassis type: %CHASSIS_TYPE% (code %CHASSIS_CODE%, laptop=%IS_LAPTOP%)"
 if "%IS_LAPTOP%"=="1" (
-    echo.
-    echo %CLR_WARNING%  ================================================================%CLR_RESET%
     echo %CLR_WARNING%  [!] LAPTOP DETECTED%CLR_RESET%
-    echo %CLR_WARNING%  ================================================================%CLR_RESET%
     echo   This optimizer applies aggressive power tweaks that may:
     echo   - Significantly reduce battery life
     echo   - Increase heat and fan noise
     echo   - Disable power-saving features
-    echo.
     echo   %CLR_SUCCESS%Recommended for laptops:%CLR_RESET%
     echo   - Only run while plugged in
     echo   - Skip GPU/Storage advanced tweaks [C]
     echo   - Consider creating a separate power plan for gaming
-    echo %CLR_WARNING%  ================================================================%CLR_RESET%
-    echo.
     choice /c YN /n /t 10 /d N /m "Continue with optimization on laptop? (Y/N, auto-No in 10s): "
     if not "!errorlevel!"=="1" (
         call :Log "User cancelled - laptop warning"
-        echo.
         echo [!] Optimization cancelled. Exiting to protect battery life.
         timeout /t 3 >nul
         exit /b 1
@@ -1110,19 +979,13 @@ if not defined BAT_STATUS exit /b 0
 
 REM BatteryStatus: 1=Discharging, 2=AC, 3=Fully Charged (AC)
 if "%BAT_STATUS%"=="1" (
-    echo.
-    echo ========================================================================
     echo   %CLR_WARNING%LAPTOP ON BATTERY DETECTED%CLR_RESET%
-    echo ========================================================================
     echo   You're running on battery power. Applying performance power settings
     echo   and core parking changes can increase drain/heat.
-    echo.
     echo   %CLR_WARNING%Recommendation:%CLR_RESET% Plug in AC power, then rerun.
-    echo.
     choice /c YN /n /t 10 /d N /m "Continue anyway? (Y/N, auto-No in 10s): "
     if not "!errorlevel!"=="1" (
         call :Log "User aborted due to on-battery warning"
-        echo.
         echo [!] Optimization cancelled. Plug in power and try again.
         timeout /t 3 >nul
         exit /b 1
@@ -1157,7 +1020,7 @@ exit /b 0
 :BackupRegistryKeys
 if defined REGISTRY_BACKUP_DONE exit /b 0
 call :Log "Backing up selected registry keys"
-echo [*] Creating registry backup before changes...
+if not defined OPTIMIZER_FULL_RUN echo [*] Creating registry backup before changes...
 if not exist "%LOG_DIR%\mouse_settings_backup.reg" (
     call :RunOperation Native reg export "HKCU\Control Panel\Mouse" "%LOG_DIR%\mouse_settings_backup.reg" /y
 )
@@ -1169,7 +1032,6 @@ call :RunOperation Native reg export "HKLM\SYSTEM\CurrentControlSet\Control\Prio
 call :RunOperation Native reg export "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" "%LOG_DIR%\backup_visualfx_%STAMP%.reg" /y
 call :RunOperation Native reg export "HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection" "%LOG_DIR%\backup_telemetry_%STAMP%.reg" /y
 call :Log "Registry backup attempts finished: %LOG_DIR%\backup_*_%STAMP%.reg"
-echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
 set "REGISTRY_BACKUP_DONE=1"
 exit /b 0
 
@@ -1181,14 +1043,9 @@ exit /b %errorlevel%
 :VerifyOptimizations
 call :Log "Running verification check"
 cls
-echo.
-echo ========================================================================
-echo   %CLR_TITLE%LIMITED CONFIGURATION CHECKS%CLR_RESET%
-echo ========================================================================
-echo.
+if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%LIMITED CONFIGURATION CHECKS%CLR_RESET%
 echo   These legacy checks cover only selected registry and service values.
 echo   Use the operation results for failures, unsupported settings and restart requirements.
-echo.
 set "VERIFY_PASS=0"
 set "VERIFY_FAIL=0"
 
@@ -1196,7 +1053,6 @@ echo   %CLR_SUBTITLE%Power Plan:%CLR_RESET%
 powercfg /getactivescheme
 echo     Portable/Modern Standby PCs retain their plan; see AC power mode in operation results.
 
-echo.
 echo   %CLR_SUBTITLE%Game Mode:%CLR_RESET%
 reg query "HKCU\Software\Microsoft\GameBar" /v AutoGameModeEnabled 2>nul | findstr "0x1" >nul
 if not errorlevel 1 (
@@ -1207,7 +1063,6 @@ if not errorlevel 1 (
     set /a VERIFY_FAIL+=1
 )
 
-echo.
 echo   %CLR_SUBTITLE%GPU Scheduling:%CLR_RESET%
 reg query "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" /v HwSchMode 2>nul | findstr "0x2" >nul
 if not errorlevel 1 (
@@ -1218,7 +1073,6 @@ if not errorlevel 1 (
     set /a VERIFY_FAIL+=1
 )
 
-echo.
 echo   %CLR_SUBTITLE%Telemetry:%CLR_RESET%
 sc query DiagTrack | findstr "STOPPED" >nul 2>&1
 if not errorlevel 1 (
@@ -1229,7 +1083,6 @@ if not errorlevel 1 (
     set /a VERIFY_FAIL+=1
 )
 
-echo.
 echo   %CLR_SUBTITLE%Visual Effects:%CLR_RESET%
 reg query "HKCU\Software\Microsoft\Windows\DWM" /v EnableAeroPeek 2>nul | findstr "0x0" >nul
 if not errorlevel 1 (
@@ -1240,7 +1093,6 @@ if not errorlevel 1 (
     set /a VERIFY_FAIL+=1
 )
 
-echo.
 echo   %CLR_SUBTITLE%Network:%CLR_RESET%
 reg query "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpNoDelay 2>nul | findstr "0x1" >nul
 if not errorlevel 1 (
@@ -1254,7 +1106,6 @@ if not errorlevel 1 (
     set /a VERIFY_FAIL+=1
 )
 
-echo.
 echo   %CLR_SUBTITLE%Startup:%CLR_RESET%
 reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize" /v StartupDelayInMSec 2>nul | findstr "0x0" >nul
 if not errorlevel 1 (
@@ -1265,7 +1116,6 @@ if not errorlevel 1 (
     set /a VERIFY_FAIL+=1
 )
 
-echo.
 echo   %CLR_SUBTITLE%Core Parking:%CLR_RESET%
 set "COREPARK_OK=0"
 set "COREPARK_LINE="
@@ -1282,21 +1132,12 @@ if "%COREPARK_OK%"=="1" (
     set /a VERIFY_FAIL+=1
 )
 
-echo.
-echo ========================================================================
-echo   %CLR_TITLE%LIMITED CHECK SUMMARY - NOT A PERFORMANCE SCORE%CLR_RESET%
-echo ========================================================================
-echo.
-set /a VERIFY_TOTAL=VERIFY_PASS+VERIFY_FAIL
-set /a VERIFY_PCT=(VERIFY_PASS*100)/VERIFY_TOTAL
-echo   Selected Checks Matched: %CLR_SUCCESS%[%VERIFY_PASS%/%VERIFY_TOTAL%]%CLR_RESET% (%VERIFY_PCT%%%)
+if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%LIMITED CHECK SUMMARY - NOT A PERFORMANCE SCORE%CLR_RESET%
+echo   Selected checks: %CLR_SUCCESS%%VERIFY_PASS% matched%CLR_RESET%, %CLR_WARNING%%VERIFY_FAIL% need review%CLR_RESET%.
 if %VERIFY_FAIL% GTR 0 (
     echo   Checks Failed: %CLR_WARNING%[%VERIFY_FAIL%/%VERIFY_TOTAL%]%CLR_RESET%
-    echo.
     echo   %CLR_WARNING%Recommendation:%CLR_RESET% Run option [1] FULL or [6] Gaming Tweaks
 )
-echo.
-echo ========================================================================
 call :Log "Verification: %VERIFY_PASS% passed, %VERIFY_FAIL% failed"
 exit /b 0
 
@@ -1308,13 +1149,11 @@ exit /b %errorlevel%
 
 :Log
 set "MESSAGE=%~1"
-echo %DATE% %TIME% - !MESSAGE!
 >>"%LOG_FILE%" echo %DATE% %TIME% - !MESSAGE!
 exit /b 0
 
 :End
 call :Log "User exited script"
-echo.
 echo Review %LOG_FILE% and the operation journal for confirmed results.
 popd >nul 2>&1
 endlocal
