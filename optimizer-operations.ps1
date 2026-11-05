@@ -186,6 +186,11 @@ function Invoke-ServiceChange {
         if ([string]$service.Status -eq $wanted) { Write-OperationResult AlreadyConfigured "Service $name" $wanted $true; return }
     }
     $result = Invoke-NativeOperation sc $Tokens[1..($Tokens.Count-1)]
+    if ($result.Code -eq 5 -and $name -ieq 'TextInputManagementService' -and
+        ($action -ieq 'stop' -or ($action -ieq 'config' -and $wanted -eq 'disabled'))) {
+        Write-OperationResult Unsupported "Service $name $action" ("Windows protects this input service; left unchanged. sc.exe returned 5: " + $result.Output.Trim())
+        return
+    }
     if ($result.Code -ne 0) { throw "sc.exe returned $($result.Code): $($result.Output.Trim())" }
     if ($action -ieq 'config') {
         if ((Get-ServiceStartup $name) -ne $wanted) { throw 'Service startup read-back does not match.' }

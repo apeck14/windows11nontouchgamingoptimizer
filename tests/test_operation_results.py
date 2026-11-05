@@ -211,6 +211,25 @@ $null=Invoke-Operation 'Service sc config Example start= disabled'
 ''')
         self.assertEqual([r['Status'] for r in rows], ['Applied','AlreadyConfigured','Failed'])
 
+
+    def test_protected_input_disable_is_skipped_without_hiding_other_service_errors(self):
+        rows, stdout = self.run_case(r'''
+function Get-Service {param($Name,$ErrorAction,$ErrorVariable) [pscustomobject]@{Name=$Name;Status='Running'}}
+function Get-ServiceStartup {param($Name) 'demand'}
+$script:code=5
+function Invoke-NativeOperation {param($Program,$Arguments) [pscustomobject]@{Code=$script:code;Output='Access denied diagnostic'}}
+$null=Invoke-Operation 'Service sc stop TextInputManagementService'
+$null=Invoke-Operation 'Service sc config TextInputManagementService start= disabled'
+$null=Invoke-Operation 'Service sc stop OtherService'
+$null=Invoke-Operation 'Service sc config TextInputManagementService start= auto'
+$script:code=1058
+$null=Invoke-Operation 'Service sc stop TextInputManagementService'
+''')
+        self.assertEqual([r['Status'] for r in rows], ['Unsupported','Unsupported','Failed','Failed','Failed'])
+        self.assertTrue(all('left unchanged' in r['Detail'] and 'Access denied diagnostic' in r['Detail'] for r in rows[:2]))
+        self.assertEqual(stdout.count('[ERROR] Service TextInputManagementService:'), 2)
+        self.assertIn('[ERROR] Service OtherService', stdout)
+
     def test_tasks_are_verified_and_missing_tasks_skipped(self):
         rows, _ = self.run_case(r'''
 $script:present=$false; $script:enabled=$true
