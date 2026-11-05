@@ -349,7 +349,7 @@ function Invoke-PerformancePlan {
         $status = 'AlreadyConfigured'
         if ((Get-ACPowerMode) -ne $wanted) { Set-ACPowerMode $wanted; $status = 'Applied' }
         if ((Get-ACPowerMode) -ne $wanted) { throw 'AC power mode read-back did not match Best performance.' }
-        Write-OperationResult $status 'AC power mode' 'Best performance preference verified. Existing power plan and battery mode preserved; Windows/OEM thermal limits still apply.' $true
+        Write-OperationResult $status 'AC power mode' 'Best performance preference verified. Battery mode preserved; Windows/OEM thermal limits still apply.' $true
         return
     }
     $plans = @(Get-PerformancePlans)

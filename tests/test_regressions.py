@@ -299,6 +299,27 @@ exit /b %CHOICE_CODE%
         for text in [SOURCE, engine, cleanup]:
             self.assertNotRegex(text, r'(?i)Remove-Appx|Remove-Item\s|StartComponentCleanup|Clear-RecycleBin')
 
+    def test_storage_detection_runs_helper_from_path_with_spaces(self):
+        folder = self.work / 'helper path & spaces'
+        folder.mkdir()
+        helper = folder / 'storage helper.ps1'
+        body = routine('DetectStorageType').replace('exit /b 0',
+                                                   'echo STORAGE=%STORAGE_TYPE%\nexit /b 0')
+        for media in ('SSD', 'HDD', 'Unknown'):
+            helper.write_text("param($Mode)\nif ($Mode -ne 'StorageType') { throw 'Wrong mode' }\n'" + media + "'\n")
+            result, _, _ = self.run_batch(body, 'DetectStorageType', extra=LOG,
+                                         env={'OPERATIONS_SCRIPT': str(helper)})
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.stderr, '')
+            self.assertIn('STORAGE=' + media, result.stdout)
+
+    def test_os_caption_command_runs_through_cmd(self):
+        result, _, _ = self.run_batch(routine('DetectOS'), 'DetectOS', extra=LOG)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stderr, '')
+        self.assertIn('Detected:', result.stdout)
+        self.assertNotIn('Detected: Windows -', result.stdout)
+
     def test_embedded_powershell_parses(self):
         # Remove batch continuation/pipe escaping, then parse, never invoke.
         joined = SOURCE.replace('^\n', '').replace('^|', '|')

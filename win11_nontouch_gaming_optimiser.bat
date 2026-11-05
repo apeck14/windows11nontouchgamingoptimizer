@@ -770,7 +770,7 @@ set "OS_MAJOR=10"
 for /f "tokens=4 delims=[] " %%I in ('ver') do (
     for /f "tokens=1 delims=." %%J in ("%%I") do set "OS_MAJOR=%%J"
 )
-for /f "usebackq delims=" %%I in (`"%POWERSHELL%" -NoProfile -Command "(Get-CimInstance Win32_OperatingSystem).Caption"`) do set "OS_CAPTION=%%I"
+for /f "usebackq delims=" %%I in (`""%POWERSHELL%" -NoProfile -Command "Get-CimInstance Win32_OperatingSystem ^| Select-Object -ExpandProperty Caption""`) do set "OS_CAPTION=%%I"
 call :Log "Detected OS: %OS_CAPTION% (major %OS_MAJOR%)"
 if %OS_MAJOR% GEQ 10 (
     echo Detected: %OS_CAPTION% - Compatible
@@ -993,7 +993,7 @@ exit /b 0
 
 :DetectStorageType
 set "STORAGE_TYPE=Unknown"
-for /f "usebackq delims=" %%I in (`"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -File "%OPERATIONS_SCRIPT%" -Mode StorageType 2^>nul`) do (
+for /f "usebackq delims=" %%I in (`""%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command ". $env:OPERATIONS_SCRIPT -Mode StorageType""`) do (
     if "%%I"=="SSD" set "STORAGE_TYPE=SSD"
     if "%%I"=="HDD" set "STORAGE_TYPE=HDD"
 )
