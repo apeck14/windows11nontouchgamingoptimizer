@@ -180,6 +180,29 @@ class Regressions(unittest.TestCase):
             self.assertIn(operation, trace)
         self.assertNotIn('bcdedit /set', trace)
 
+    def test_full_run_visual_choice_controls_all_preliminary_visual_changes(self):
+        body = mock_commands(routine('ApplyGamingTweaks'))
+        for full in ('', '1'):
+            result, trace, _ = self.run_batch(body, 'ApplyGamingTweaks',
+                extra=LOG + MOCK + stub('BackupRegistryKeys'),
+                env={'OPTIMIZER_FULL_RUN':full, 'DVR_PREF_SET':'1', 'DISABLE_DVR':'0'})
+            self.assertEqual(result.returncode, 0)
+            for setting in ('VisualFXSetting', 'EnableTransparency', 'MenuShowDelay'):
+                self.assertEqual(setting in trace, not bool(full))
+            self.assertIn('HwSchMode', trace)
+            self.assertIn('WaitToKillAppTimeout', trace)
+        body = mock_commands(routine('DisableAnimations'))
+        for choice in ('1', '2', '3'):
+            result, trace, _ = self.run_batch(body, 'DisableAnimations', extra=LOG + MOCK + CHOOSE,
+                                             env={'CHOICE_CODE':choice, 'OPTIMIZER_FULL_RUN':'1'})
+            self.assertEqual(result.returncode, 0)
+            if choice == '3':
+                self.assertEqual(trace, '')
+            else:
+                self.assertIn('MenuShowDelay', trace)
+                self.assertIn('VisualFXSetting /t REG_DWORD /d 3', trace)
+                self.assertIn('EnableTransparency /t REG_DWORD /d '+('1' if choice == '1' else '0'), trace)
+
     def test_capture_opt_out_preserves_settings_and_opt_in_disables_recording(self):
         for disable in ['0', '1']:
             with self.subTest(disable=disable):

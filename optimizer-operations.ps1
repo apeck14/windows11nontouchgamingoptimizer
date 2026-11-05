@@ -555,9 +555,10 @@ function Get-NativeDesiredState {
     $exe = [IO.Path]::GetFileNameWithoutExtension($Tokens[0]).ToLowerInvariant()
     if ($exe -eq 'netsh' -and $Tokens.Count -eq 6 -and ($Tokens[1..4] -join ' ') -eq 'interface tcp set global') {
         $pair = $Tokens[5] -split '=',2
-        if ($pair[0] -eq 'autotuninglevel') {
+        $tcpProperties = @{autotuninglevel='AutoTuningLevelLocal';ecncapability='EcnCapability'}
+        if ($tcpProperties.ContainsKey($pair[0]) -and $pair[1] -ne 'default') {
             $value = Get-NetTCPSetting -SettingName Internet -ErrorAction Stop
-            return [string]$value.AutoTuningLevelLocal -ieq $pair[1]
+            return [string]$value.($tcpProperties[$pair[0]]) -ieq $pair[1]
         }
         $names = @{rss='ReceiveSideScaling';rsc='ReceiveSegmentCoalescing'}
         if ($names.ContainsKey($pair[0]) -and $pair[1] -ne 'default') {

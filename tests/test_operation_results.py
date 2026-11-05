@@ -434,6 +434,29 @@ $null=Invoke-Operation "Native powercfg -setacvalueindex $guid SUB_PROCESSOR CPM
         self.assertEqual(rows[0]['Status'], 'AlreadyConfigured')
         self.assertTrue(rows[0]['Verified'])
 
+
+    def test_ecn_verifies_already_configured_applied_and_noop_failure(self):
+        rows, _ = self.run_case(r'''
+$script:ecn='Disabled'; $script:apply=$true; $script:writes=0
+function Get-NetTCPSetting {param($SettingName,$ErrorAction)
+    if($SettingName -ne 'Internet'){throw 'Wrong TCP template'}
+    [pscustomobject]@{EcnCapability=$script:ecn}
+}
+function Invoke-NativeOperation {param($Program,$Arguments)
+    if($Program -ne 'netsh' -or ($Arguments -join ' ') -ne 'interface tcp set global ecncapability=disabled'){throw 'Unexpected mutation'}
+    $script:writes++
+    if($script:apply){$script:ecn='Disabled'}
+    [pscustomobject]@{Code=0;Output='localized output'}
+}
+$op='Native netsh interface tcp set global ecncapability=disabled'
+$null=Invoke-Operation $op
+if($script:writes -ne 0){throw 'Already disabled ECN was rewritten'}
+$script:ecn='Enabled'; $null=Invoke-Operation $op
+$script:ecn='Enabled'; $script:apply=$false; $null=Invoke-Operation $op
+''')
+        self.assertEqual([r['Status'] for r in rows], ['AlreadyConfigured','Applied','Failed'])
+        self.assertTrue(all(r['Verified'] for r in rows[:2]))
+
     def test_pagefile_already_managed_does_not_write(self):
         rows, _ = self.run_case(r'''
 function Get-CimInstance {param($ClassName,$ErrorAction) [pscustomobject]@{AutomaticManagedPagefile=$true}}

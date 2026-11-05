@@ -305,9 +305,11 @@ if "%DISABLE_DVR%"=="1" (
 )
 
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" /v HwSchMode /t REG_DWORD /d 2 /f
-call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 0 /f
-call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" /v VisualFXSetting /t REG_DWORD /d 2 /f
-call :RunOperation Registry reg add "HKCU\Control Panel\Desktop" /v MenuShowDelay /t REG_SZ /d 0 /f
+if not defined OPTIMIZER_FULL_RUN (
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 0 /f
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" /v VisualFXSetting /t REG_DWORD /d 2 /f
+    call :RunOperation Registry reg add "HKCU\Control Panel\Desktop" /v MenuShowDelay /t REG_SZ /d 0 /f
+)
 call :RunOperation Registry reg add "HKCU\Control Panel\Desktop" /v WaitToKillAppTimeout /t REG_SZ /d 2000 /f
 call :RunOperation Registry reg add "HKCU\Control Panel\Desktop" /v HungAppTimeout /t REG_SZ /d 1000 /f
 call :Log "Gaming tweaks: scheduler priorities"
@@ -477,6 +479,8 @@ if "%ANIM_CHOICE%"=="3" (
     call :Log "User skipped animation changes"
     exit /b 0
 )
+
+call :RunOperation Registry reg add "HKCU\Control Panel\Desktop" /v MenuShowDelay /t REG_SZ /d 0 /f
 
 if "%ANIM_CHOICE%"=="1" (
     if not defined OPTIMIZER_FULL_RUN echo [*] Applying BALANCED visual settings...
