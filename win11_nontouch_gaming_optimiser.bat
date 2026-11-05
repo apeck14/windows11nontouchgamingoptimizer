@@ -91,7 +91,6 @@ if errorlevel 1 (
 call :Log "Awaiting menu selection"
 echo.
 echo    %CLR_MENU%[1 / F]%CLR_RESET% FULL OPTIMIZATION - All gaming tweaks in one run
-echo    %CLR_MENU%[2]%CLR_RESET% RECOMMENDED - Core essentials only (faster)
 echo.
 echo    %CLR_MENU%[3]%CLR_RESET% Set up protection and create restore point
 echo    %CLR_MENU%[R]%CLR_RESET% Open Windows System Restore
@@ -123,7 +122,6 @@ set "OPTIMIZER_ACTION_ID=%RANDOM%-%RANDOM%"
 if /I "%choice%"=="P" set "OPTIMIZER_ACTION_ID="
 if /I "%choice%"=="1" (call :FullOptimization & call :PauseReturn & goto Menu)
 if /I "%choice%"=="F" (call :FullOptimization & call :PauseReturn & goto Menu)
-if /I "%choice%"=="2" (call :RunRecommended & call :PauseReturn & goto Menu)
 if /I "%choice%"=="3" (call :CreateRestorePoint & call :PauseReturn & goto Menu)
 if /I "%choice%"=="R" (start "" "%SystemRoot%\System32\rstrui.exe" & goto Menu)
 if /I "%choice%"=="4" (call :Debloat & call :PauseReturn & goto Menu)
@@ -202,43 +200,6 @@ echo   %CLR_SUCCESS%FULL OPTIMIZATION ATTEMPTS FINISHED - REVIEW RESULTS%CLR_RES
 echo   Please %CLR_WARNING%RESTART%CLR_RESET% your device for all changes to take effect.
 echo ========================================================================
 call :Log "Full optimization attempts finished; review operation results"
-call :ShowChangesSummary
-exit /b %errorlevel%
-
-:RunRecommended
-call :Log "Running recommended sequence"
-echo.
-echo ========================================================================
-echo   %CLR_TITLE%RECOMMENDED GAMING OPTIMIZATION%CLR_RESET%
-echo ========================================================================
-echo   This will apply the most important gaming optimizations.
-echo   %CLR_WARNING%Estimated time: 3-5 minutes%CLR_RESET%
-echo ========================================================================
-echo.
-call :WarnIfOnBattery
-if errorlevel 1 exit /b 1
-call :PrepareOptimization
-if errorlevel 1 exit /b 1
-echo.
-echo [*] Step 1/7: Reviewing installed apps...
-call :Debloat
-echo [*] Step 2/7: Applying gaming tweaks...
-call :ApplyGamingTweaks
-echo [*] Step 3/7: Optimizing services...
-call :OptimizeServices
-echo [*] Step 4/7: Applying network optimizations...
-call :ApplyNetworkTweaksSafe
-echo [*] Step 5/7: Optimizing visual effects...
-call :DisableAnimations
-echo [*] Step 6/7: Disabling CPU core parking...
-call :DisableCoreParking
-echo [*] Step 7/7: Finalizing...
-echo.
-echo ========================================================================
-echo   %CLR_SUCCESS%RECOMMENDED ATTEMPTS FINISHED - REVIEW RESULTS%CLR_RESET%
-echo   Please %CLR_WARNING%RESTART%CLR_RESET% your device for all changes to take effect.
-echo ========================================================================
-call :Log "Recommended optimization attempts finished; review operation results"
 call :ShowChangesSummary
 exit /b %errorlevel%
 
@@ -860,7 +821,7 @@ exit /b 0
 
 :ShowHelp
 echo.
-echo Full and Recommended attempt a restore point before making changes.
+echo Full optimization attempts a restore point before making changes.
 echo Individual actions do not create a restore point automatically. File cleanup only recycles.
 echo Review [P] Operation results for failures and restart requirements.
 echo [V] checks selected live settings; it is not a performance score.
@@ -1123,7 +1084,6 @@ if "%IS_LAPTOP%"=="1" (
     echo.
     echo   %CLR_SUCCESS%Recommended for laptops:%CLR_RESET%
     echo   - Only run while plugged in
-    echo   - Use option [2] RECOMMENDED instead of FULL
     echo   - Skip GPU/Storage advanced tweaks [C]
     echo   - Consider creating a separate power plan for gaming
     echo %CLR_WARNING%  ================================================================%CLR_RESET%
@@ -1333,7 +1293,7 @@ echo   Selected Checks Matched: %CLR_SUCCESS%[%VERIFY_PASS%/%VERIFY_TOTAL%]%CLR_
 if %VERIFY_FAIL% GTR 0 (
     echo   Checks Failed: %CLR_WARNING%[%VERIFY_FAIL%/%VERIFY_TOTAL%]%CLR_RESET%
     echo.
-    echo   %CLR_WARNING%Recommendation:%CLR_RESET% Run option [2] RECOMMENDED or [6] Gaming Tweaks
+    echo   %CLR_WARNING%Recommendation:%CLR_RESET% Run option [1] FULL or [6] Gaming Tweaks
 )
 echo.
 echo ========================================================================

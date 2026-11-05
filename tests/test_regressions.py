@@ -88,7 +88,7 @@ class Regressions(unittest.TestCase):
         body = ':Dispatch\n' + menu[menu.index('if /I "%choice%"=="1"'):]
         body = body.replace('start "" "%SystemRoot%\\System32\\rstrui.exe"', 'call :OpenRestore')
         targets = set(re.findall(r'call :(\w+)', body)) | {'Menu', 'End'}
-        for choice, expected in [('1','FullOptimization'), ('2','RunRecommended'),
+        for choice, expected in [('1','FullOptimization'), ('2','PauseReturn'),
                                  ('3','CreateRestorePoint'), ('R','OpenRestore'),
                                  ('G','RunOperation'), ('M','MemoryIntegrityMenu'), ('0','End')]:
             with self.subTest(choice=choice):
@@ -126,23 +126,23 @@ class Regressions(unittest.TestCase):
                                  service_code == checkpoint_code == 0)
 
     def test_sequences_stop_before_mutations_on_battery_or_cancelled_preparation(self):
-        for name in ['FullOptimization', 'RunRecommended']:
-            body = routine(name)
-            calls = set(re.findall(r'call :(\w+)', body)) - {'Log'}
-            for failure in ['WarnIfOnBattery', 'PrepareOptimization', None]:
-                with self.subTest(routine=name, failure=failure):
-                    extra = LOG + ''.join(stub(n, int(n == failure)) for n in calls)
-                    result, trace, _ = self.run_batch(body, name, extra=extra)
-                    events = trace.splitlines()
-                    self.assertEqual(events[0], 'WarnIfOnBattery')
-                    if failure:
-                        self.assertEqual(result.returncode, 1)
-                        self.assertNotIn('Debloat', events)
-                        self.assertEqual(events[-1], failure)
-                    else:
-                        self.assertEqual(result.returncode, 0)
-                        self.assertIn('ApplyGamingTweaks', events)
-                        self.assertIn('ShowChangesSummary', events)
+        name = 'FullOptimization'
+        body = routine(name)
+        calls = set(re.findall(r'call :(\w+)', body)) - {'Log'}
+        for failure in ['WarnIfOnBattery', 'PrepareOptimization', None]:
+            with self.subTest(routine=name, failure=failure):
+                extra = LOG + ''.join(stub(n, int(n == failure)) for n in calls)
+                result, trace, _ = self.run_batch(body, name, extra=extra)
+                events = trace.splitlines()
+                self.assertEqual(events[0], 'WarnIfOnBattery')
+                if failure:
+                    self.assertEqual(result.returncode, 1)
+                    self.assertNotIn('Debloat', events)
+                    self.assertEqual(events[-1], failure)
+                else:
+                    self.assertEqual(result.returncode, 0)
+                    self.assertIn('ApplyGamingTweaks', events)
+                    self.assertIn('ShowChangesSummary', events)
 
     def test_restore_failure_requires_explicit_continue(self):
         body = mock_commands(routine('PrepareOptimization'))

@@ -6,8 +6,8 @@ Windows configuration and recycle-only cleanup. Originally by [Matt Hurley](http
 
 Extract all three `.bat`/`.ps1` files together and run `win11_nontouch_gaming_optimiser.bat` as administrator. The menu describes individual actions.
 
-- Full/Recommended default to **memory integrity (HVCI) off**, reducing security and potentially affecting anti-cheat compatibility. **M** re-enables it. Game DVR recording defaults off; answer No to preserve capture settings. Installed apps remain installed. Performance gains are not guaranteed.
-- Both presets attempt to enable System Protection and verify a new restore point. Failure defaults to cancelling. **3** creates a checkpoint; **R** opens System Restore. Individual tweaks do not create checkpoints automatically. Restore points can expire; **Undo** is partial, not a substitute for a backup.
+- Full optimization defaults to **memory integrity (HVCI) off**, reducing security and potentially affecting anti-cheat compatibility. **M** re-enables it. Game DVR recording defaults off; answer No to preserve capture settings. Installed apps remain installed. Performance gains are not guaranteed.
+- Full optimization attempts to enable System Protection and verify a new restore point. Failure defaults to cancelling. **3** creates a checkpoint; **R** opens System Restore. Individual tweaks do not create checkpoints automatically. Restore points can expire; **Undo** is partial, not a substitute for a backup.
 - **B** recycles user temp files older than 30 days. **J** shows storage/app-folder estimates in GB and **automatically recycles duplicate loose downloads**, keeping one copy after comparing extensions and all data streams. Other cleanup candidates require selection.
 - Files go only to the Recycle Bin; space is not freed until it is emptied. Storage Sense or other software can empty it independently. System/update caches and pending crash reports are excluded.
 - Each action ends with a short summary. **P** summarizes the session. Detailed results and selected registry backups are in `logs/`; check failures and restart notices before rerunning.
