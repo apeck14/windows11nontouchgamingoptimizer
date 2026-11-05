@@ -76,7 +76,9 @@ function Write-OperationResult {
             '^Native ' { 'System command'; break }
             default { $Operation }
         }
-        $reason = if ($Detail -match 'access.*denied|returned 5\b|0x80070005') {'Windows denied access.'}
+        $reason = if ($Operation -like 'MW4*' -and $Detail -like 'Close Call of Duty*') {'Close Call of Duty and its game hub, then try again.'}
+            elseif ($Operation -like 'MW4*' -and $Detail -match 'changed (since|after)') {'Settings changed since backup; your newer edits were preserved.'}
+            elseif ($Detail -match 'access.*denied|returned 5\b|0x80070005') {'Windows denied access.'}
             elseif ($Detail -match 'read.back|did not match|not.*verified') {'Could not verify the change.'}
             else {'Could not complete this change.'}
         Write-Host ("[ERROR] {0}: {1} Details are in the log." -f $label,$reason) -ForegroundColor Red
@@ -646,6 +648,7 @@ function Show-OperationSummary {
     $changed = @($entries | Where-Object { $_.Verified -and $_.Status -in @('Applied','RestartRequired') })
     $areas = @($changed | Where-Object { $_.Operation -notlike 'Recycle *' -and $_.Operation -notlike 'reg export *' -and $_.Operation -ne 'System restore point' } | ForEach-Object {
         switch -Regex ($_.Operation) {
+            '^MW4' {'MW4 / Warzone'; break}
             '^Service |^Task ' {'Services & background tasks'; break}
             'GameBar|GameDVR|GameConfigStore|GraphicsDrivers|DirectX|Mouse|mouclass|kbdclass' {'Gaming, graphics & input'; break}
             '^Memory|Memory Management|^Page file|DeviceGuard' {'Memory & security'; break}
@@ -661,6 +664,12 @@ function Show-OperationSummary {
         foreach ($area in $areas) { Write-Host ("    - $area") -ForegroundColor Green }
     } else { Write-Host '  No new setting changes confirmed.' }
     Write-Host ''
+    $gameChanges = @($changed | Where-Object Operation -like 'MW4 config *').Count
+    $driverChanges = @($changed | Where-Object Operation -like 'MW4 NVIDIA *').Count
+    if ($gameChanges -or $driverChanges) {
+        Write-Host ("  Game settings  $gameChanges updated; $driverChanges NVIDIA settings updated.") -ForegroundColor Green
+        Write-Host '  Recovery       Restore MW4 / Warzone settings undoes this preset.' -ForegroundColor DarkGray
+    }
     if (@($changed | Where-Object Operation -eq 'System restore point').Count) { Write-Host '  Restore point  Saved and verified. Restore via Recovery.' -ForegroundColor Green }
     $recycled = @($changed | Where-Object Operation -like 'Recycle *')
     if ($recycled.Count) {
@@ -696,6 +705,12 @@ function Invoke-Operation {
             Task { Invoke-TaskChange $tokens[1..($tokens.Count-1)] }
             Feature { Invoke-FeatureChange $tokens[1] $tokens[2] }
             Cleanup { . (Join-Path $PSScriptRoot 'optimizer-cleanup.ps1'); Invoke-RecycleCleanup $tokens[1] }
+            MW4 {
+                . (Join-Path $PSScriptRoot 'optimizer-mw4.ps1')
+                if ($tokens[1] -eq 'Apply') { Invoke-Mw4Optimization }
+                elseif ($tokens[1] -eq 'Restore') { Restore-Mw4Optimization }
+                else { throw 'Unknown MW4 action.' }
+            }
             Memory { Invoke-MemoryChange $tokens[1] ($tokens[2] -eq '1') }
             Pagefile { Invoke-PagefileChange $tokens[1] }
             Plan { Invoke-PerformancePlan }

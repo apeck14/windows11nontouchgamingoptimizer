@@ -37,6 +37,10 @@ if not exist "%OPERATIONS_SCRIPT%" (
     echo [!] Missing optimizer-operations.ps1. Download and extract the complete repository ZIP.
     exit /b 1
 )
+for %%F in (optimizer-mw4.ps1 optimizer-nvidia.cs) do if not exist "%SCRIPT_DIR%%%F" (
+    echo [!] Missing %%F. Extract the complete repository ZIP.
+    exit /b 1
+)
 
 set "RELAUNCHED="
 if /I "%~1"=="-Elevated" (
@@ -78,9 +82,10 @@ call :Log "Initialization complete - entering menu"
 cls
 call :Banner
 call :Log "Awaiting menu selection"
-echo    %CLR_MENU%[1]%CLR_RESET% Full optimization - all gaming tweaks
+echo    %CLR_MENU%[1]%CLR_RESET% Full optimization - Windows gaming tweaks
 echo    %CLR_MENU%[2]%CLR_RESET% Quick cleanup - recycle old temporary files
 echo    %CLR_MENU%[3]%CLR_RESET% Deep cleanup - storage review and file cleanup
+echo    %CLR_MENU%[4]%CLR_RESET% MW4 / Warzone - competitive game settings
 echo    %CLR_MENU%[R]%CLR_RESET% Recovery - restore points, undo, memory integrity
 echo    %CLR_MENU%[P]%CLR_RESET% Results from this session
 echo    %CLR_MENU%[H]%CLR_RESET% Help
@@ -93,6 +98,7 @@ if /I "%choice%"=="P" set "OPTIMIZER_ACTION_ID="
 if /I "%choice%"=="1" (call :FullOptimization & call :PauseReturn & goto Menu)
 if /I "%choice%"=="2" (call :FreeDiskSpace & call :PauseReturn & goto Menu)
 if /I "%choice%"=="3" (call :RunOperation Cleanup Deep & call :PauseReturn & goto Menu)
+if /I "%choice%"=="4" (call :RunOperation MW4 Apply & call :PauseReturn & goto Menu)
 if /I "%choice%"=="R" (call :RecoveryMenu & goto Menu)
 if /I "%choice%"=="H" (call :ShowHelp & call :PauseReturn & goto Menu)
 if /I "%choice%"=="P" (call :ShowChangesSummary & call :PauseReturn & goto Menu)
@@ -107,19 +113,21 @@ echo   [1] Create a restore point
 echo   [2] Open Windows System Restore
 echo   [3] Partial undo - reset selected settings
 echo   [4] Memory integrity on/off
+echo   [5] Restore MW4 / Warzone settings
 echo   [0] Back
-choice /c 12340 /n /m "Select: "
+choice /c 123450 /n /m "Select: "
 set "recovery_choice=%errorlevel%"
 if "%recovery_choice%"=="1" (call :CreateRestorePoint & call :PauseReturn)
 if "%recovery_choice%"=="2" start "" "%SystemRoot%\System32\rstrui.exe"
 if "%recovery_choice%"=="3" (call :UndoChanges & call :PauseReturn)
 if "%recovery_choice%"=="4" (call :MemoryIntegrityMenu & call :PauseReturn)
+if "%recovery_choice%"=="5" (call :RunOperation MW4 Restore & call :PauseReturn)
 exit /b 0
 
 :FullOptimization
 call :Log "Running FULL optimization sequence"
 echo   %CLR_TITLE%FULL GAMING OPTIMIZATION%CLR_RESET%
-echo   This will apply ALL gaming optimizations for maximum performance.
+echo   This will apply all Windows gaming optimizations.
 echo   %CLR_WARNING%Estimated time: 5-10 minutes%CLR_RESET%
 call :WarnIfOnBattery
 if errorlevel 1 exit /b 1

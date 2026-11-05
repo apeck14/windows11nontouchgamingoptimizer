@@ -89,7 +89,7 @@ class Regressions(unittest.TestCase):
         body = body.replace('start "" "%SystemRoot%\\System32\\rstrui.exe"', 'call :OpenRestore')
         targets = set(re.findall(r'call :(\w+)', body)) | {'Menu', 'End'}
         for choice, expected in [('1','FullOptimization'), ('2','FreeDiskSpace'),
-                                 ('3','RunOperation'), ('R','RecoveryMenu'),
+                                 ('3','RunOperation'), ('4','RunOperation'), ('R','RecoveryMenu'),
                                  ('P','ShowChangesSummary'), ('H','ShowHelp'),
                                  ('G','PauseReturn'), ('M','PauseReturn'), ('0','End')]:
             with self.subTest(choice=choice):
@@ -281,9 +281,9 @@ class Regressions(unittest.TestCase):
 
     def test_recovery_routes_only_the_selected_action(self):
         body = mock_commands(routine('RecoveryMenu')).replace('start "" "%SystemRoot%\\System32\\rstrui.exe"', 'call :OpenRestore')
-        targets = ['CreateRestorePoint','OpenRestore','UndoChanges','MemoryIntegrityMenu','PauseReturn']
+        targets = ['CreateRestorePoint','OpenRestore','UndoChanges','MemoryIntegrityMenu','PauseReturn','RunOperation']
         for selection, target in [(1,'CreateRestorePoint'), (2,'OpenRestore'),
-                                  (3,'UndoChanges'), (4,'MemoryIntegrityMenu'), (5,None)]:
+                                  (3,'UndoChanges'), (4,'MemoryIntegrityMenu'), (5,'RunOperation'), (6,None)]:
             result, trace, _ = self.run_batch(body, 'RecoveryMenu', extra=CHOOSE +
                 ''.join(stub(n) for n in targets), env={'CHOICE_CODE':str(selection)})
             self.assertEqual(result.returncode, 0)
