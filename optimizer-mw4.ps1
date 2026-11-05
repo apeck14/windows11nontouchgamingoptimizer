@@ -39,6 +39,12 @@ function Convert-Mw4Config {
         DxrMode=@('Off'); MotionBlur=@('Off'); WeaponMotionBlur=@('false'); EnableVelocityBasedBlur=@('false')
         DofEnable=@('Off'); DofWeaponDisable=@('true'); DofWorldDisable=@('true'); FilmGrain=@('0')
         ShadowQuality=@('Low','Very_Low'); ShadowFilteringQuality=@('Low'); TerrainQuality=@('Low','Very Low')
+        ShaderQuality=@('Low'); ShadingQuality=@('Low'); SSRQuality=@('Off'); ReflectionProbeHalfResolution=@('true')
+        ParticleQuality=@('low','very low'); DeferredPhysics=@('Low Quality','Off')
+        WaterCausticsMode=@('Off'); WaterWaveWetness=@('false'); WeatherGridVolumesQuality=@('Low','Off')
+        AmbientLightingQuality=@('Low','Off'); ScreenSpaceShadowQuality=@('Low','Off')
+        VolumetricQuality=@('QUALITY_MEDIUM','QUALITY_LOW'); Tessellation=@('1_Near','0_Off')
+        GPUUploadHeaps=@('true')
     }
     if ($Nvidia) { $rules.NvidiaReflex=@('Enabled + boost') }
     $changes = [Collections.Generic.List[object]]::new()
@@ -123,11 +129,12 @@ function Get-Mw4DriverPlan {
         }
         if ($seen.ContainsKey($profile.ToString())) { continue }
         $seen[$profile.ToString()] = $true
-        # Public NvApiDriverSettings.h IDs: V-Sync, frame limiter, preferred refresh rate.
+        # Public NvApiDriverSettings.h IDs; application profile only.
         foreach ($setting in @(
             @{Id=0x00A879CF;Value=0x08416747;Name='V-Sync off'},
             @{Id=0x10835002;Value=0;Name='Frame limiter off'},
-            @{Id=0x0064B541;Value=1;Name='Highest available refresh rate'}
+            @{Id=0x0064B541;Value=1;Name='Highest available refresh rate'},
+            @{Id=0x1057EB71;Value=1;Name='Prefer maximum performance'}
         )) {
             try {
                 $old = $Driver.Read($profile,$setting.Id)
@@ -264,8 +271,8 @@ function Restore-Mw4Optimization {
         if (@($manifest.Driver).Count) { $driver = Open-Mw4Driver }
         foreach ($change in $manifest.Driver) {
             try {
-                # The manifest may only restore the three DWORD settings owned by this preset.
-                if ($change.App -notmatch '^cod(?:\d+-cod)?\.exe$' -or $change.Id -notin @(0x00A879CF,0x10835002,0x0064B541)) { throw 'Unrecognized driver backup entry.' }
+                # The manifest may only restore the DWORD settings owned by this preset.
+                if ($change.App -notmatch '^cod(?:\d+-cod)?\.exe$' -or $change.Id -notin @(0x00A879CF,0x10835002,0x0064B541,0x1057EB71)) { throw 'Unrecognized driver backup entry.' }
                 $profile = $driver.FindProfile($change.App)
                 if ($profile -eq [IntPtr]::Zero) { throw 'Original application profile is no longer available.' }
                 $now = $driver.Read($profile,$change.Id)

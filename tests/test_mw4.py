@@ -33,6 +33,7 @@ class FakeDriver {
         $this.State[0x00A879CF]=@{Data=1;UserOverride=$true}
         $this.State[0x10835002]=@{Data=60;UserOverride=$false}
         $this.State[0x0064B541]=@{Data=0;UserOverride=$false}
+        $this.State[0x1057EB71]=@{Data=5;UserOverride=$false}
     }
     [IntPtr] FindProfile([string]$app) { return [IntPtr]1 }
     [object] Read([IntPtr]$p,[int]$id) { return $this.State[$id] }
@@ -42,7 +43,7 @@ class FakeDriver {
     }
     [void] Reset([IntPtr]$p,[int]$id) {
         $this.Resets++
-        $value=if($id -eq 0x10835002){60}else{0}
+        $value=if($id -eq 0x10835002){60}elseif($id -eq 0x1057EB71){5}else{0}
         $this.State[$id]=@{Data=$value;UserOverride=$false}
     }
     [void] Save() { $this.Saves++; if($this.FailSave){throw 'Save failed'} }
@@ -133,6 +134,67 @@ foreach($name in @('s.1.0.cod26.txt','s.1.0.cod25.txt0','s.1.0.cod25.txt1','s.3.
 if(@(Get-Mw4Files).Count -ne 5){throw 'Discovery matched unrelated files or rejected future version'}
 ''')
 
+    def test_expanded_effects_preset_writes_real_files_and_restores(self):
+        rows = self.run_case(r'''
+$text=@'
+ShaderQuality@0;19450;7764 = Default // one of Default, Medium, Low
+ShadingQuality@0;14472;11445 = High // one of Low, High
+SSRQuality@0;63075;11445 = High // one of Off, Low, Medium, High
+ReflectionProbeHalfResolution@0;57752;48403 = false
+ParticleQuality@0;60198;58629 = high // one of very low, low, medium, high
+DeferredPhysics@0;6619;43096 = High Quality // one of Low Quality, Medium Quality, High Quality
+WaterCausticsMode@0;41499;11445 = High Quality // one of Off, Low Quality, High Quality
+WaterWaveWetness@0;57752;20945 = true
+WeatherGridVolumesQuality@0;38459;58629 = Ultra // one of Off, Low, Medium, High, Ultra
+AmbientLightingQuality@0;20439;58629 = Ultra // one of Off, Low, Medium, High, Ultra
+ScreenSpaceShadowQuality@0;42742;43096 = High // one of Off, Low, High
+VolumetricQuality@0;4276;43096 = QUALITY_VERYHIGH // one of QUALITY_LOW, QUALITY_MEDIUM, QUALITY_HIGH, QUALITY_VERYHIGH
+Tessellation@0;27349;11445 = 2_All // one of 0_Off, 1_Near, 2_All
+GPUUploadHeaps@0;57752;20945 = false
+TextureQuality@0;61129;7764 = 0 // 0 to 3
+ModelQuality@0;15002;43096 = High Quality // one of Low Quality, Medium Quality, High Quality
+'@
+$path=Join-Path $root 's.1.0.cod26.txt'
+[IO.File]::WriteAllText($path,$text)
+$hash=Get-Mw4Hash ([IO.File]::ReadAllBytes($path))
+Invoke-Mw4Optimization
+$updated=[IO.File]::ReadAllText($path)
+foreach($expected in @('ShaderQuality@0;19450;7764 = Low','ShadingQuality@0;14472;11445 = Low',
+    'SSRQuality@0;63075;11445 = Off','ReflectionProbeHalfResolution@0;57752;48403 = true',
+    'ParticleQuality@0;60198;58629 = low','DeferredPhysics@0;6619;43096 = Low Quality',
+    'WaterCausticsMode@0;41499;11445 = Off','WaterWaveWetness@0;57752;20945 = false',
+    'WeatherGridVolumesQuality@0;38459;58629 = Low','AmbientLightingQuality@0;20439;58629 = Low',
+    'ScreenSpaceShadowQuality@0;42742;43096 = Low','VolumetricQuality@0;4276;43096 = QUALITY_MEDIUM',
+    'Tessellation@0;27349;11445 = 1_Near','GPUUploadHeaps@0;57752;20945 = true',
+    'TextureQuality@0;61129;7764 = 0','ModelQuality@0;15002;43096 = High Quality')) {
+    if(-not $updated.Contains($expected)){throw "Unexpected result: $expected"}
+}
+Invoke-Mw4Optimization
+if(@(Get-ChildItem (Get-Mw4BackupRoot) -Directory).Count -ne 1){throw 'Repeated apply changed the backup'}
+Restore-Mw4Optimization
+if((Get-Mw4Hash ([IO.File]::ReadAllBytes($path))) -ne $hash){throw 'Expanded preset did not restore exactly'}
+''')
+        self.assertEqual(sum(r['Status'] == 'Applied' and r['Operation'].startswith('MW4 config ') for r in rows), 14)
+        self.assertFalse(any(r['Status'] == 'Failed' for r in rows))
+
+    def test_expanded_preset_keeps_lower_quality_and_skips_changed_value_domains(self):
+        self.run_case(r'''
+$text=@'
+ParticleQuality@0;1;1 = very low // one of very low, low, medium, high
+DeferredPhysics@0;1;1 = Off // one of Off, Low Quality, High Quality
+WeatherGridVolumesQuality@0;1;1 = Off // one of Off, Low, High
+AmbientLightingQuality@0;1;1 = Off // one of Off, Low, High
+ScreenSpaceShadowQuality@0;1;1 = Off // one of Off, Low, High
+VolumetricQuality@0;1;1 = QUALITY_LOW // one of QUALITY_LOW, QUALITY_MEDIUM, QUALITY_HIGH
+Tessellation@0;1;1 = 0_Off // one of 0_Off, 1_Near, 2_All
+ShaderQuality@0;1;1 = Automatic // one of Automatic, Normal, Advanced
+GPUUploadHeaps@0;1;1 = 2 // 0 to 3
+SSRQuality@0;1;1 = High // one of Low, Medium, High
+'@
+$result=Convert-Mw4Config $text $true
+if($result.Text -cne $text -or $result.Changes.Count -ne 0 -or $result.Skipped -ne 3){throw 'Raised quality or forced incompatible values'}
+''')
+
     def test_readonly_files_and_post_apply_edits_are_preserved(self):
         rows = self.run_case(r'''
 $path=Join-Path $root 's.1.0.cod26.txt'
@@ -193,7 +255,7 @@ class MissingDriver {
 $plan=@(Get-Mw4DriverPlan ([MissingDriver]::new()) @('cod.exe','cod26-cod.exe'))
 if($plan.Count){throw 'Created changes for unsupported profiles/settings'}
 ''')
-        self.assertEqual([r['Status'] for r in rows], ['Unsupported']*4)
+        self.assertEqual([r['Status'] for r in rows], ['Unsupported']*5)
 
     def test_file_changes_during_planning_are_not_overwritten(self):
         self.run_case(r'''
@@ -211,16 +273,16 @@ if(-not $failed -or [IO.File]::ReadAllText($path) -ne 'newer user settings'){thr
 [IO.File]::WriteAllText((Join-Path $root 's.1.0.cod26.txt'),'1')
 [IO.File]::WriteAllText((Join-Path $root 's.1.0.cod25.txt0'),'1')
 Invoke-Mw4Optimization
-if($driver.Writes -ne 3 -or $driver.Saves -ne 3){throw 'Shared profile modified more than once'}
+if($driver.Writes -ne 4 -or $driver.Saves -ne 4){throw 'Shared profile modified more than once'}
 Invoke-Mw4Optimization
-if($driver.Writes -ne 3){throw 'No-op rewrote driver settings'}
+if($driver.Writes -ne 4){throw 'No-op rewrote driver settings'}
 Restore-Mw4Optimization
-if($driver.Resets -ne 2 -or $driver.Writes -ne 4){throw 'Did not preserve inherited vs explicit settings'}
+if($driver.Resets -ne 3 -or $driver.Writes -ne 5){throw 'Did not preserve inherited vs explicit settings'}
 Restore-Mw4Optimization
-if($driver.Resets -ne 2 -or $driver.Writes -ne 4){throw 'Restore not idempotent'}
+if($driver.Resets -ne 3 -or $driver.Writes -ne 5){throw 'Restore not idempotent'}
 ''')
         self.assertFalse(any(r['Status'] == 'Failed' for r in rows))
-        self.assertEqual(sum(r['Status'] == 'Applied' for r in rows), 6)
+        self.assertEqual(sum(r['Status'] == 'Applied' for r in rows), 8)
 
     def test_silent_driver_failure_is_never_reported_as_success(self):
         rows = self.run_case(DRIVER+r'''
@@ -228,7 +290,7 @@ $driver.SilentFailure=$true
 [IO.File]::WriteAllText((Join-Path $root 's.1.0.cod26.txt'),'1')
 Invoke-Mw4Optimization
 ''')
-        self.assertEqual(sum(r['Status'] == 'Failed' for r in rows), 3)
+        self.assertEqual(sum(r['Status'] == 'Failed' for r in rows), 4)
         self.assertFalse(any(r['Status'] == 'Applied' for r in rows))
 
     def test_driver_save_failure_and_later_user_edit_are_not_overwritten(self):
@@ -241,7 +303,7 @@ if($driver.State[0x10835002].Data -ne 120){throw 'Overwrote user FPS cap'}
 $driver.FailSave=$true
 Invoke-Mw4Optimization
 ''')
-        self.assertEqual(sum(r['Status'] == 'Failed' for r in rows), 4)
+        self.assertEqual(sum(r['Status'] == 'Failed' for r in rows), 5)
 
 
 if __name__ == '__main__':
