@@ -241,6 +241,11 @@ function Get-AutomaticCleanupRoots([string]$Scope = 'Deep') {
         }
     }
     if ($Scope -eq 'Safe') { return }
+    foreach ($folder in Get-KnownGameFolders) {
+        foreach ($diagnostic in $folder.Diagnostics) {
+            [pscustomobject]@{Path=(Join-Path $folder.Path $diagnostic);Category='Old game diagnostic';Days=30;Extensions=@('.log','.dmp','.mdmp','.xml');Automatic=$true;Processes=$folder.Processes}
+        }
+    }
     $browsers=@('chrome','msedge','brave','firefox','opera','vivaldi')
     $downloads=Get-DownloadsFolder
     if ($downloads) {
@@ -351,6 +356,66 @@ function Get-AppInventory {
     $apps | Sort-Object App,Path -Unique
 }
 
+function Get-KnownGameFolders {
+    $documents=[Environment]::GetFolderPath('MyDocuments')
+    foreach ($entry in @(
+        @('Call of Duty Vanguard',$documents,'Call of Duty Vanguard',@('Vanguard'),@()),
+        @('Fortnite',$env:LOCALAPPDATA,'FortniteGame',@('FortniteClient-Win64-Shipping','FortniteLauncher','CrashReportClient'),@('Saved\Logs','Saved\Crashes')),
+        @('Rocket League',$documents,'My Games\Rocket League',@('RocketLeague'),@('TAGame\Logs')),
+        @('Battle.net',$env:LOCALAPPDATA,'Battle.net',@('Battle.net','Agent'),@('Logs'))
+    )) {
+        if (-not $entry[1]) { continue }
+        $path=Join-Path $entry[1] $entry[2]
+        if (Test-CleanupPath $path) {
+            [pscustomobject]@{Game=$entry[0];Path=$path;Processes=$entry[3];Diagnostics=$entry[4]}
+        }
+    }
+}
+
+function Get-CleanupInstalledNames {
+    (Get-AppInventory).App
+    $epic=Join-Path $env:ProgramData 'Epic\EpicGamesLauncher\Data\Manifests'
+    foreach ($manifest in Get-ChildItem -LiteralPath $epic -Filter '*.item' -File -ErrorAction SilentlyContinue) {
+        if ($manifest.Length -gt 1MB) { continue }
+        try { ([IO.File]::ReadAllText($manifest.FullName) | ConvertFrom-Json -ErrorAction Stop).DisplayName }
+        catch { continue }
+    }
+    # Steam manifests cover secondary libraries and games without uninstall entries.
+    $steam=Get-ItemPropertyValue 'HKCU:\Software\Valve\Steam' SteamPath -ErrorAction SilentlyContinue
+    if (-not $steam) { return }
+    $libraries=@($steam)
+    $config=Join-Path $steam 'steamapps\libraryfolders.vdf'
+    if (Test-Path -LiteralPath $config -PathType Leaf) {
+        try { $libraries+=@([regex]::Matches([IO.File]::ReadAllText($config),'"path"\s+"([^"\r\n]+)"') | ForEach-Object { $_.Groups[1].Value.Replace('\\','\') }) }
+        catch { }
+    }
+    foreach ($library in $libraries | Select-Object -Unique) {
+        if (-not [IO.Path]::IsPathRooted($library) -or $library.StartsWith('\\')) { continue }
+        foreach ($manifest in Get-ChildItem -LiteralPath (Join-Path $library 'steamapps') -Filter 'appmanifest_*.acf' -File -ErrorAction SilentlyContinue) {
+            if ($manifest.Length -gt 1MB) { continue }
+            try { $match=[regex]::Match([IO.File]::ReadAllText($manifest.FullName),'"name"\s+"([^"\r\n]+)"') }
+            catch { continue }
+            if ($match.Success) { $match.Groups[1].Value }
+        }
+    }
+}
+
+function Show-PossibleLeftoverFolders {
+    $folders=@(Get-KnownGameFolders)
+    if (-not $folders.Count) { return }
+    $names=@(Get-CleanupInstalledNames | ForEach-Object { $_ -replace '[^a-zA-Z0-9]','' })
+    $leftovers=@($folders | Where-Object {
+        $name=$_.Game -replace '[^a-zA-Z0-9]',''
+        -not @($names | Where-Object { $_ -like "*$name*" }).Count -and -not (Test-CleanupBusy $_.Processes '')
+    })
+    if (-not $leftovers.Count) { return }
+    Write-Host "`nPOSSIBLE LEFTOVER GAME / APP FOLDERS - no matching installation record"
+    Measure-StorageRoots @($leftovers | ForEach-Object { [pscustomobject]@{Category=$_.Game;Path=$_.Path} }) |
+        Select-Object @{n='Game / app';e={$_.Category}},@{n='Remaining GB';e={[math]::Round($_.Bytes/1GB,2)}},Partial,Path |
+        Format-Table -AutoSize -Wrap | Out-String -Width 200 | Write-Host
+    Write-Host 'Inspect these paths manually. They may contain saves, settings or mods; absence from installation records is not proof they are unused.'
+}
+
 function Show-AppInventory {
     $apps = @(Get-AppInventory)
     Write-Host 'Installed apps are listed for review only; installed applications cannot be recycled safely.'
@@ -391,6 +456,7 @@ function Invoke-RecycleCleanup([string]$Scope) {
         $success = Invoke-RecycleFiles @(Get-DuplicateDownloads)
         Write-Host 'Running quick cleanup plus old web caches, abandoned downloads and verified driver extractions; the newest driver package is kept.'
         if (-not (Invoke-RecycleFiles @(Get-AutomaticCleanupFiles))) { $success=$false }
+        Show-PossibleLeftoverFolders
     }
     $files = @(Get-CleanupCandidates $Scope | Sort-Object Path -Unique)
     if ($Scope -eq 'Deep') {
