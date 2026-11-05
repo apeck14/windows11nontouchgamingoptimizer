@@ -308,7 +308,6 @@ for %%A in (
     Microsoft.ZuneVideo
     MicrosoftWindows.Client.WebExperience
     Microsoft.YourPhone
-    SpotifyAB.SpotifyMusic
     BytedancePte.Ltd.TikTok
     Facebook.Facebook
     Disney.37853FC22B2CE
@@ -320,8 +319,8 @@ for %%A in (
 ) do (
     call :RemoveApp %%A
 )
-call :Log "Debloat: Game Bar and Xbox app preserved"
-echo [*] Skipping removal of Xbox/Game Bar components to keep overlay and sign-in working.
+call :Log "Debloat: Spotify, Game Bar and Xbox app preserved"
+echo [*] Preserving Spotify and Xbox/Game Bar components.
 call :Log "Debloat routine complete"
 call :AddToSummary "Bloatware removed"
 echo.
@@ -1045,7 +1044,7 @@ echo           input lag reduction, high priority for games
 echo   Network: TCP tuning, reduced latency, disabled P2P updates
 echo   GPU: 20+ latency tweaks, power state optimization
 echo   Services: Disabled telemetry, indexing, tips, CEIP
-echo   Bloat: Removed Bing apps, Xbox TCUI, Teams, Spotify, TikTok, etc.
+echo   Bloat: Removes selected consumer apps; preserves Spotify and Xbox/Game Bar
 echo   Visual: Transparency off, animations disabled
 echo.
 echo   %CLR_SUBTITLE%SAFETY FEATURES:%CLR_RESET%

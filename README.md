@@ -22,7 +22,7 @@ Run the non-administrative regression tests with `python tests/test_regressions.
 
 ### Performance scope
 
-The fork retains the original debloat list, touch/pen removal, gaming and GPU settings, service/telemetry changes, audio settings, memory/page-file tuning, and aggressive TCP option. Full mode still uses aggressive network tuning; Recommended still uses the safe option. Repairs make those operations reachable and preserve user choices; they are not FPS benchmarks.
+The fork preserves Spotify while retaining the other debloat targets, touch/pen removal, gaming and GPU settings, service/telemetry changes, audio settings, memory/page-file tuning, and aggressive TCP option. Full mode still uses aggressive network tuning; Recommended still uses the safe option. Repairs make those operations reachable and preserve user choices; they are not FPS benchmarks.
 
 Two removed settings remain intentionally removed:
 - Rewriting core-parking `ValueMin`/`ValueMax` to zero is unnecessary: the retained [`CPMINCORES=100` disables core parking](https://learn.microsoft.com/en-us/windows-hardware/customize/power-settings/options-for-core-parking-cpmincores).
@@ -166,7 +166,7 @@ Windows Update cache removal reclaims disk space, but updates may download those
 - Advertising ID and cloud content disabled
 
 ### **Bloatware Removed**
-Consumer apps: Bing News/Weather/Finance, Clipchamp, GetHelp, Office Hub, Solitaire, Sticky Notes, Skype, Teams, TikTok, Spotify, Facebook, Disney+, and more. Xbox/Game Bar components are preserved so the overlay continues to work.
+Consumer apps: Bing News/Weather/Finance, Clipchamp, GetHelp, Office Hub, Solitaire, Sticky Notes, Skype, Teams, TikTok, Facebook, Disney+, and more. Spotify and Xbox/Game Bar components are preserved. The script does not uninstall Spotify or change its startup setting.
 
 ### **Visual Effects**
 - Transparency disabled
