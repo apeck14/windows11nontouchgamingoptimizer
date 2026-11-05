@@ -113,28 +113,28 @@ echo.
 set "choice="
 set /p "choice=> "
 set "choice=%choice:~0,1%"
-if /I "%choice%"=="1" call :FullOptimization & call :PauseReturn & goto Menu
-if /I "%choice%"=="F" call :FullOptimization & call :PauseReturn & goto Menu
-if /I "%choice%"=="2" call :RunRecommended & call :PauseReturn & goto Menu
-if /I "%choice%"=="3" call :CreateRestorePoint & call :PauseReturn & goto Menu
-if /I "%choice%"=="R" start "" "%SystemRoot%\System32\rstrui.exe" & goto Menu
-if /I "%choice%"=="4" call :Debloat & call :PauseReturn & goto Menu
-if /I "%choice%"=="5" call :DisableTouchFeatures & call :PauseReturn & goto Menu
-if /I "%choice%"=="6" call :GamingTweaksMenu & call :PauseReturn & goto Menu
-if /I "%choice%"=="7" call :OptimizeServices & call :PauseReturn & goto Menu
-if /I "%choice%"=="8" call :NetworkMenu & goto Menu
-if /I "%choice%"=="9" call :DisableAnimations & call :PauseReturn & goto Menu
-if /I "%choice%"=="A" call :OptimizeStartup & call :PauseReturn & goto Menu
-if /I "%choice%"=="B" call :FreeDiskSpace & call :PauseReturn & goto Menu
-if /I "%choice%"=="C" call :AdvancedGPUStorage & call :PauseReturn & goto Menu
-if /I "%choice%"=="D" call :OptimizeAudio & call :PauseReturn & goto Menu
-if /I "%choice%"=="E" call :DisableXboxServices & call :PauseReturn & goto Menu
-if /I "%choice%"=="G" call :RunOperation Graphics Check & call :PauseReturn & goto Menu
-if /I "%choice%"=="M" call :MemoryIntegrityMenu & call :PauseReturn & goto Menu
-if /I "%choice%"=="H" call :ShowHelp & call :PauseReturn & goto Menu
-if /I "%choice%"=="P" call :ShowChangesSummary & call :PauseReturn & goto Menu
-if /I "%choice%"=="V" call :VerifyOptimizations & call :PauseReturn & goto Menu
-if /I "%choice%"=="U" call :UndoChanges & call :PauseReturn & goto Menu
+if /I "%choice%"=="1" (call :FullOptimization & call :PauseReturn & goto Menu)
+if /I "%choice%"=="F" (call :FullOptimization & call :PauseReturn & goto Menu)
+if /I "%choice%"=="2" (call :RunRecommended & call :PauseReturn & goto Menu)
+if /I "%choice%"=="3" (call :CreateRestorePoint & call :PauseReturn & goto Menu)
+if /I "%choice%"=="R" (start "" "%SystemRoot%\System32\rstrui.exe" & goto Menu)
+if /I "%choice%"=="4" (call :Debloat & call :PauseReturn & goto Menu)
+if /I "%choice%"=="5" (call :DisableTouchFeatures & call :PauseReturn & goto Menu)
+if /I "%choice%"=="6" (call :GamingTweaksMenu & call :PauseReturn & goto Menu)
+if /I "%choice%"=="7" (call :OptimizeServices & call :PauseReturn & goto Menu)
+if /I "%choice%"=="8" (call :NetworkMenu & goto Menu)
+if /I "%choice%"=="9" (call :DisableAnimations & call :PauseReturn & goto Menu)
+if /I "%choice%"=="A" (call :OptimizeStartup & call :PauseReturn & goto Menu)
+if /I "%choice%"=="B" (call :FreeDiskSpace & call :PauseReturn & goto Menu)
+if /I "%choice%"=="C" (call :AdvancedGPUStorage & call :PauseReturn & goto Menu)
+if /I "%choice%"=="D" (call :OptimizeAudio & call :PauseReturn & goto Menu)
+if /I "%choice%"=="E" (call :DisableXboxServices & call :PauseReturn & goto Menu)
+if /I "%choice%"=="G" (call :RunOperation Graphics Check & call :PauseReturn & goto Menu)
+if /I "%choice%"=="M" (call :MemoryIntegrityMenu & call :PauseReturn & goto Menu)
+if /I "%choice%"=="H" (call :ShowHelp & call :PauseReturn & goto Menu)
+if /I "%choice%"=="P" (call :ShowChangesSummary & call :PauseReturn & goto Menu)
+if /I "%choice%"=="V" (call :VerifyOptimizations & call :PauseReturn & goto Menu)
+if /I "%choice%"=="U" (call :UndoChanges & call :PauseReturn & goto Menu)
 if "%choice%"=="0" goto End
 echo.
 echo [!] Unknown selection. Please try again.
@@ -426,7 +426,7 @@ if "%DISABLE_DVR%"=="1" (
     call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v AppCaptureEnabled /t REG_DWORD /d 0 /f
     call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v HistoricalCaptureEnabled /t REG_DWORD /d 0 /f
     call :RunOperation Registry reg add "HKCU\System\GameConfigStore" /v GameDVR_Enabled /t REG_DWORD /d 0 /f
-    call :Log "Gaming tweaks: Game DVR recording disabled"
+    call :Log "Gaming tweaks: Game DVR disable requested; see operation results"
 ) else (
     call :Log "Gaming tweaks: existing Game DVR settings preserved"
 )

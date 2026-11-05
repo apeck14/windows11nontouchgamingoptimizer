@@ -320,6 +320,19 @@ if($script:original -eq 'existing'){
                     self.assertTrue(rows[0]['Verified'])
                     self.assertIn('#2:', rows[0]['Detail'])
 
+    def test_restore_frequency_write_failure_keeps_original_error(self):
+        rows, _ = self.run_case(r'''
+function Get-RegistryState {param($Path,$Name) @{Exists=$false}}
+function Enable-ComputerRestore {param($Drive,$ErrorAction,$WarningAction)}
+function Get-CimInstance {param($Namespace,$ClassName,$ErrorAction)}
+function New-ItemProperty {throw 'Frequency write denied'}
+function Remove-ItemProperty {throw 'Unexpected cleanup masked original error'}
+function Invoke-CimMethod {throw 'Snapshot must not run'}
+$null=Invoke-Operation 'Restore Create'
+''')
+        self.assertEqual(rows[0]['Status'], 'Failed')
+        self.assertEqual(rows[0]['Detail'], 'Frequency write denied')
+
     def test_restore_does_not_override_disabling_policy(self):
         rows, _ = self.run_case(r'''
 function Get-RegistryState {param($Path,$Name) @{Exists=$true;Value=1}}

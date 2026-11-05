@@ -87,6 +87,22 @@ class Regressions(unittest.TestCase):
         targets = re.findall(r'\b(?:call\s+:|goto\s+)(\w+)', SOURCE, re.I)
         self.assertFalse(set(x.lower() for x in targets) - set(x.lower() for x in labels))
 
+    def test_menu_dispatches_only_the_selected_action(self):
+        menu = routine('Menu')
+        body = ':Dispatch\n' + menu[menu.index('if /I "%choice%"=="1"'):]
+        body = body.replace('start "" "%SystemRoot%\\System32\\rstrui.exe"', 'call :OpenRestore')
+        targets = set(re.findall(r'call :(\w+)', body)) | {'Menu', 'End'}
+        for choice, expected in [('1','FullOptimization'), ('2','RunRecommended'),
+                                 ('3','CreateRestorePoint'), ('R','OpenRestore'),
+                                 ('G','RunOperation'), ('M','MemoryIntegrityMenu'), ('0','End')]:
+            with self.subTest(choice=choice):
+                result, trace, _ = self.run_batch(body, 'Dispatch',
+                    extra=''.join(stub(target) for target in targets), env={'choice':choice})
+                self.assertEqual(result.returncode, 0)
+                events = trace.splitlines()
+                self.assertEqual(events[0], expected)
+                self.assertTrue(set(events) <= {expected, 'PauseReturn', 'Menu'})
+
     def test_restore_success_and_failures(self):
         body = re.sub(r'^call :RunOperation Restore Create', 'call :Checkpoint',
                       routine('CreateRestorePoint'), flags=re.M)

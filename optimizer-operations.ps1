@@ -319,8 +319,10 @@ function New-OptimizerRestorePoint {
     if ($frequency.Exists -and $frequency.Type -ne 'DWord') { throw 'Unexpected restore-point frequency registry type; left unchanged.' }
     # Permit a fresh pre-change checkpoint even if Windows created one today.
     # Restore the user's frequency immediately, including on failure.
+    $frequencyChanged = $false
     try {
         New-ItemProperty -LiteralPath $key -Name $name -PropertyType DWord -Value 0 -Force -ErrorAction Stop | Out-Null
+        $frequencyChanged = $true
         $result = Invoke-CimMethod -Namespace root/default -ClassName SystemRestore -MethodName CreateRestorePoint -Arguments @{
             Description=$description; RestorePointType=[uint32]12; EventType=[uint32]100
         } -ErrorAction Stop
@@ -329,9 +331,9 @@ function New-OptimizerRestorePoint {
             Where-Object { $_.Description -eq $description -and $_.SequenceNumber -notin $before })
         if ($point.Count -ne 1) { throw 'Windows did not expose a new matching restore point. No checkpoint has been verified.' }
     } finally {
-        if ($frequency.Exists) {
+        if ($frequencyChanged -and $frequency.Exists) {
             New-ItemProperty -LiteralPath $key -Name $name -PropertyType DWord -Value $frequency.Value -Force -ErrorAction Stop | Out-Null
-        } else {
+        } elseif ($frequencyChanged) {
             Remove-ItemProperty -LiteralPath $key -Name $name -ErrorAction Stop
         }
     }
