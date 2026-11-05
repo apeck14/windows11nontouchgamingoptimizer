@@ -341,6 +341,18 @@ if((Show-OperationSummary) -ne 1){throw 'Failed operation was not reflected in e
         self.assertIn('Log: logs\\log.txt', summary)
         self.assertIn('    - Gaming, graphics & input', summary)
 
+    def test_cleanup_summary_uses_readable_units_for_small_amounts(self):
+        _, output = self.run_case(r'''
+foreach($bytes in @(0,1,512,1KB,1MB,3MB,1GB)) {
+    $env:OPTIMIZER_ACTION_ID=[string]$bytes
+    Write-OperationResult Applied 'Recycle C:\small.zip' 'recycled' $true $bytes
+    $null=Show-OperationSummary
+}
+''')
+        for size in ('0 B', '1 B', '512 B', '1.00 KB', '1.00 MB', '3.00 MB', '1.00 GB'):
+            self.assertIn(f'1 file moved to Recycle Bin ({size})', output)
+        self.assertNotIn('0.00 GB', output)
+
     def test_summary_separates_actions_but_keeps_session_report(self):
         _, output = self.run_case(r'''
 $env:OPTIMIZER_ACTION_ID='first'

@@ -662,10 +662,14 @@ function Show-OperationSummary {
     if (@($changed | Where-Object Operation -eq 'System restore point').Count) { Write-Host '  Restore point  Saved and verified. Restore via Recovery.' -ForegroundColor Green }
     $recycled = @($changed | Where-Object Operation -like 'Recycle *')
     if ($recycled.Count) {
-        $gb = ($recycled | Measure-Object Bytes -Sum).Sum / 1GB
+        $bytes = ($recycled | Measure-Object Bytes -Sum).Sum
+        $size = if ($bytes -ge 1GB) { '{0:N2} GB' -f ($bytes / 1GB) }
+                elseif ($bytes -ge 1MB) { '{0:N2} MB' -f ($bytes / 1MB) }
+                elseif ($bytes -ge 1KB) { '{0:N2} KB' -f ($bytes / 1KB) }
+                else { '{0:N0} B' -f $bytes }
         $duplicates = @($recycled | Where-Object Duplicate -eq $true).Count
         $noun = if ($recycled.Count -eq 1) {'file'} else {'files'}
-        Write-Host ('  Cleanup        {0} {1} moved to Recycle Bin ({2:N2} GB).' -f $recycled.Count,$noun,$gb) -ForegroundColor Green
+        Write-Host ('  Cleanup        {0} {1} moved to Recycle Bin ({2}).' -f $recycled.Count,$noun,$size) -ForegroundColor Green
         if ($duplicates) { Write-Host ("                 Duplicate downloads: $duplicates") -ForegroundColor DarkGray }
         Write-Host '                 Empty the Recycle Bin to free this space.'
     } elseif (@($entries | Where-Object Operation -like 'Recycle *').Count) {
