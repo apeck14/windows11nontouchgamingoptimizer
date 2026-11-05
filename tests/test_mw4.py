@@ -99,9 +99,9 @@ Unknown@1;2;3 = $(throw 'Never evaluated')
 '@
 $text=$text.Replace("`r`n","`n").Replace("`n","`r`n")
 $result=Convert-Mw4Config $text
-if($result.Changes.Count -ne 5 -or $result.Skipped -ne 0){throw ('Incorrect compatible changes: '+($result | ConvertTo-Json -Depth 5))}
+if($result.Changes.Count -ne 6 -or $result.Skipped -ne 0){throw ('Incorrect compatible changes: '+($result | ConvertTo-Json -Depth 5))}
 if($result.Text -notmatch '  DxrMode:0.0 = "Off" // one of Off, On'){throw 'Lost syntax'}
-foreach($line in $text -split "`r`n" | Where-Object {$_ -match '^(Resolution|Texture|Renderer|Mouse|ConfigCloud|Unknown|ShadowQuality|NvidiaReflex)'}) {
+foreach($line in $text -split "`r`n" | Where-Object {$_ -match '^(Resolution|Renderer|Mouse|ConfigCloud|Unknown|ShadowQuality|NvidiaReflex)'}) {
     if(-not $result.Text.Contains($line)){throw "Modified protected line: $line"}
 }
 if((Convert-Mw4Config $result.Text).Text -cne $result.Text){throw 'Not idempotent'}
@@ -248,9 +248,9 @@ foreach($expected in @('ShaderQuality@0;19450;7764 = Low','ShadingQuality@0;1447
     'ParticleQuality@0;60198;58629 = low','DeferredPhysics@0;6619;43096 = Low Quality',
     'WaterCausticsMode@0;41499;11445 = Off','WaterWaveWetness@0;57752;20945 = false',
     'WeatherGridVolumesQuality@0;38459;58629 = Low','AmbientLightingQuality@0;20439;58629 = Low',
-    'ScreenSpaceShadowQuality@0;42742;43096 = Low','VolumetricQuality@0;4276;43096 = QUALITY_MEDIUM',
+    'ScreenSpaceShadowQuality@0;42742;43096 = Low','VolumetricQuality@0;4276;43096 = QUALITY_LOW',
     'Tessellation@0;27349;11445 = 1_Near','GPUUploadHeaps@0;57752;20945 = false',
-    'TextureQuality@0;61129;7764 = 0','ModelQuality@0;15002;43096 = High Quality')) {
+    'TextureQuality@0;61129;7764 = 3','ModelQuality@0;15002;43096 = Low Quality')) {
     if(-not $updated.Contains($expected)){throw "Unexpected result: $expected"}
 }
 Invoke-Mw4Optimization
@@ -258,8 +258,29 @@ if(@(Get-ChildItem (Get-Mw4BackupRoot) -Directory).Count -ne 1){throw 'Repeated 
 Restore-Mw4Optimization
 if((Get-Mw4Hash ([IO.File]::ReadAllBytes($path))) -ne $hash){throw 'Expanded preset did not restore exactly'}
 ''')
-        self.assertEqual(sum(r['Status'] == 'Applied' and r['Operation'].startswith('MW4 config ') for r in rows), 13)
+        self.assertEqual(sum(r['Status'] == 'Applied' and r['Operation'].startswith('MW4 config ') for r in rows), 15)
         self.assertFalse(any(r['Status'] == 'Failed' for r in rows))
+
+    def test_texture_quality_uses_reversed_scale_and_preserves_unknown_domains(self):
+        self.run_case(r'''
+foreach($level in @(0,1,2,3)) {
+    $text='TextureQuality:0.0 = "'+$level+'" // 0 to 3'
+    $result=Convert-Mw4Config $text
+    if($result.Text -cne 'TextureQuality:0.0 = "3" // 0 to 3'){throw 'Incorrect texture scale or lost quoting'}
+    if($result.Changes.Count -ne [int]($level -ne 3)){throw 'Incorrect change count'}
+    if((Convert-Mw4Config $result.Text).Changes.Count){throw 'Texture preset not idempotent'}
+}
+foreach($line in @('TextureQuality@0;1;1 = 1 // 0 to 4',
+    'TextureQuality@0;1;1 = High // one of Low, High',
+    'TextureQuality@0;1;1 = 1',
+    'TextureQuality@0;1;1 = -1 // 0 to 3',
+    'ModelQuality@0;1;1 = High // one of Low, High')) {
+    $result=Convert-Mw4Config $line
+    if($result.Text -cne $line -or $result.Skipped -ne 1){throw 'Forced an incompatible texture/model setting'}
+}
+$text='VolumetricQuality@0;1;1 = QUALITY_MEDIUM // one of QUALITY_LOW, QUALITY_MEDIUM, QUALITY_HIGH'
+if((Convert-Mw4Config $text).Text -notmatch '= QUALITY_LOW //'){throw 'Medium volumetrics were retained'}
+''')
 
     def test_expanded_preset_keeps_lower_quality_and_skips_changed_value_domains(self):
         self.run_case(r'''

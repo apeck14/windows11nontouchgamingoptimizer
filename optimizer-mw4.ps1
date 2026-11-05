@@ -52,10 +52,11 @@ function Convert-Mw4Config {
         DepthOfField=@('Off','false'); DofEnable=@('Off'); DofWeaponDisable=@('true'); DofWorldDisable=@('true'); FilmGrain=@('0')
         ShadowQuality=@('Low','Very_Low'); ShadowFilteringQuality=@('Low'); TerrainQuality=@('Low','Very Low')
         ShaderQuality=@('Low'); ShadingQuality=@('Low'); SSRQuality=@('Off'); SSRMode=@('Off'); ReflectionProbeHalfResolution=@('true')
+        TextureQuality=@('3'); ModelQuality=@('Low Quality')
         ParticleQuality=@('low','very low'); DeferredPhysics=@('Low Quality','Off')
         WaterCausticsMode=@('Off'); WaterWaveWetness=@('false'); WeatherGridVolumesQuality=@('Low','Off')
         AmbientLightingQuality=@('Low','Off'); ScreenSpaceShadowQuality=@('Low','Off')
-        VolumetricQuality=@('QUALITY_MEDIUM','QUALITY_LOW'); Tessellation=@('1_Near','0_Off')
+        VolumetricQuality=@('QUALITY_LOW'); Tessellation=@('1_Near','0_Off')
     }
     if ($AmdAntiLag2) { $rules.AmdAntilag2=@('true') }
     $changes = [Collections.Generic.List[object]]::new()
@@ -81,6 +82,9 @@ function Convert-Mw4Config {
             $compatible = $target -cin $allowed -and $current -cin $allowed
         } elseif ($target -in @('true','false')) {
             $compatible = $current -cin @('true','false')
+        } elseif ($key -eq 'TextureQuality' -and $comment -match '//\s*0 to 3\s*$') {
+            # The game's scale is reversed: 0 is highest resolution, 3 is lowest.
+            $compatible = $current -cmatch '^[0-3]$'
         } elseif ($key -eq 'FilmGrain' -and $comment -match '//\s*0(?:\.0+)? to 1(?:\.0+)?\s*$') {
             $number = 0.0
             $compatible = [double]::TryParse($current,[Globalization.NumberStyles]::Float,[Globalization.CultureInfo]::InvariantCulture,[ref]$number) -and $number -ge 0 -and $number -le 1
