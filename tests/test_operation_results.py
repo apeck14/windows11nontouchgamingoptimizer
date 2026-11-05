@@ -324,12 +324,42 @@ if($script:recycles -ne 1){throw 'Changed file was recycled'}
 $script:inventoryShown=$false
 function Get-CleanupCandidates {param($Scope) [pscustomobject]@{Path='example.zip';Modified=(Get-Date);Bytes=7}}
 function Show-AppInventory {$script:inventoryShown=$true}
+function Show-StorageSummary {}
 function Out-GridView {param($Title,[switch]$PassThru)}
 function Move-CleanupFileToRecycleBin {throw 'Cancellation must not recycle'}
 Invoke-RecycleCleanup Deep
 if(-not $script:inventoryShown){throw 'App inventory was not shown'}
 ''')
         self.assertEqual(rows[0]['Status'], 'AlreadyConfigured')
+
+    def test_storage_measurement_does_not_double_count_nested_categories(self):
+        self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$root=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'documents'
+$pictures=Join-Path $root 'pictures'
+$null=New-Item -ItemType Directory $pictures -Force
+[IO.File]::WriteAllBytes((Join-Path $root 'doc.bin'),[byte[]]::new(10))
+[IO.File]::WriteAllBytes((Join-Path $pictures 'photo.bin'),[byte[]]::new(20))
+$usage=@(Measure-StorageRoots @(
+    [pscustomobject]@{Category='Documents';Path=$root},
+    [pscustomobject]@{Category='Pictures';Path=$pictures}
+))
+if(($usage | Where-Object Category -eq Documents).Bytes -ne 10){throw 'Nested picture counted in Documents'}
+if(($usage | Where-Object Category -eq Pictures).Bytes -ne 20){throw 'Picture size incorrect'}
+''')
+
+    def test_storage_summary_shows_gb_categories_and_investigation_paths(self):
+        _, output = self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+function Get-StorageRoots {}
+function Measure-StorageRoots {param($Roots)
+    [pscustomobject]@{Category='Pictures';Bytes=2GB;Path='C:\Pictures';Partial=$false}
+    [pscustomobject]@{Category='Apps';Bytes=5GB;Path='C:\Apps';Partial=$true}
+}
+Show-StorageSummary
+''')
+        for expected in ['Free GB', 'Used GB', 'Pictures', 'Apps', 'Partial', 'C:\\Pictures', 'not additive']:
+            self.assertIn(expected, output)
 
     def test_recycle_api_compiles_without_touching_files(self):
         self.run_case(r'''

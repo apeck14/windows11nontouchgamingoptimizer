@@ -9,7 +9,7 @@ Extract the repository ZIP, keeping all three `.bat`/`.ps1` files together. Run 
 - **1/F Full:** all routines, including aggressive networking and advanced GPU/storage settings; recycles old user temp files.
 - **2 Recommended:** app inventory, gaming settings, services, safe networking, visuals and core parking.
 - **4:** installed-app inventory; no uninstall. **B:** recycle user temp files older than 30 days.
-- **J:** select old downloads, crash dumps and recordings to recycle. Nothing is preselected.
+- **J:** storage usage by category in GB, with folders to investigate; then select old downloads, crash dumps and recordings to recycle. Nothing is preselected. Category sizes are estimates; skipped locations are marked partial.
 - **3:** set up System Protection and create a restore point. **R:** open System Restore.
 - **G:** display refresh/GPU checks. **M:** memory integrity on/off.
 - **P:** session operation results. **V:** limited live configuration checks.

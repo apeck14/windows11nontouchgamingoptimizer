@@ -54,12 +54,74 @@ public static class OptimizerRecycle {
 '@
 }
 
+function Get-DownloadsFolder {
+    $shell = New-Object -ComObject Shell.Application
+    try { $shell.Namespace('shell:Downloads').Self.Path }
+    finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) }
+}
+
+function Get-StorageRoots {
+    foreach ($pair in @(@('Pictures','MyPictures'),@('Videos','MyVideos'),@('Music','MyMusic'),@('Documents','MyDocuments'),@('Desktop','DesktopDirectory'))) {
+        $path = [Environment]::GetFolderPath($pair[1])
+        if ($path) { [pscustomobject]@{Category=$pair[0];Path=$path} }
+    }
+    $downloads = Get-DownloadsFolder
+    if ($downloads) { [pscustomobject]@{Category='Downloads';Path=$downloads} }
+    foreach ($path in @($env:ProgramFiles,${env:ProgramFiles(x86)},(Join-Path $env:LOCALAPPDATA 'Programs')) | Select-Object -Unique) {
+        if ($path) { [pscustomobject]@{Category='Apps';Path=$path} }
+    }
+    foreach ($path in @($env:LOCALAPPDATA,$env:APPDATA)) {
+        if ($path) { [pscustomobject]@{Category='App data & caches';Path=$path} }
+    }
+}
+
+function Measure-StorageRoots($Roots) {
+    $roots = @($Roots | Where-Object { $_.Path -and [IO.Path]::IsPathRooted($_.Path) } |
+        ForEach-Object { [pscustomobject]@{Category=$_.Category;Path=[IO.Path]::GetFullPath($_.Path).TrimEnd('\')} } |
+        Sort-Object Path -Unique)
+    foreach ($root in $roots) {
+        Write-Host ("Measuring {0}: {1}" -f $root.Category,$root.Path)
+        [long]$bytes = 0; $partial = $false
+        $pending = [Collections.Generic.Stack[string]]::new()
+        if (Test-Path -LiteralPath $root.Path -PathType Container) { $pending.Push($root.Path) }
+        while ($pending.Count) {
+            $path = $pending.Pop()
+            try {
+                $directory = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+                if ([long]$directory.Attributes -band (0x400 -bor 0x1000 -bor 0x40000 -bor 0x400000)) { $partial=$true; continue }
+                foreach ($item in Get-ChildItem -LiteralPath $path -Force -ErrorAction Stop) {
+                    if ([long]$item.Attributes -band (0x400 -bor 0x1000 -bor 0x40000 -bor 0x400000)) { $partial=$true; continue }
+                    if ($item.PSIsContainer) {
+                        # Nested known folders are measured in their own category, once.
+                        if ($item.FullName.TrimEnd('\') -notin $roots.Path) { $pending.Push($item.FullName) }
+                    } else { $bytes += $item.Length }
+                }
+            } catch { $partial=$true }
+        }
+        [pscustomobject]@{Category=$root.Category;Path=$root.Path;Bytes=$bytes;Partial=$partial}
+    }
+}
+
+function Show-StorageSummary {
+    Write-Host "`nSTORAGE OVERVIEW - current usage, before emptying the Recycle Bin"
+    [IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq 'Fixed' -and $_.IsReady } |
+        Select-Object @{n='Drive';e={$_.Name}},@{n='Used GB';e={[math]::Round(($_.TotalSize-$_.TotalFreeSpace)/1GB,2)}},
+            @{n='Free GB';e={[math]::Round($_.AvailableFreeSpace/1GB,2)}},@{n='Total GB';e={[math]::Round($_.TotalSize/1GB,2)}} |
+        Format-Table -AutoSize | Out-String | Write-Host
+    $usage = @(Measure-StorageRoots @(Get-StorageRoots))
+    $usage | Group-Object Category | ForEach-Object {
+        [pscustomobject]@{Category=$_.Name; 'Used GB (estimate)'=[math]::Round(($_.Group | Measure-Object Bytes -Sum).Sum/1GB,2);
+            Coverage=if ($_.Group.Partial -contains $true) {'Partial'} else {'Scanned'};
+            'Investigate folders'=($_.Group.Path -join '; ')}
+    } | Sort-Object 'Used GB (estimate)' -Descending | Format-Table -AutoSize -Wrap | Out-String -Width 200 | Write-Host
+    Write-Host 'Category sizes are file-size estimates, not additive disk totals. Windows, other users, custom app/game libraries and the Recycle Bin are not categorized.'
+    Write-Host 'Links, cloud placeholders and inaccessible folders are skipped. For a complete breakdown, open Settings > System > Storage.'
+}
+
 function Get-CleanupRoots([string]$Scope) {
     [pscustomobject]@{Path=(Join-Path $env:LOCALAPPDATA 'Temp'); Category='Old temporary file'; Days=30; Extensions=$null}
     if ($Scope -eq 'Deep') {
-        $shell = New-Object -ComObject Shell.Application
-        try { $downloads = $shell.Namespace('shell:Downloads').Self.Path }
-        finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) }
+        $downloads = Get-DownloadsFolder
         if ($downloads) {
             [pscustomobject]@{Path=$downloads; Category='Old download - review'; Days=90; Extensions=@('.exe','.msi','.msix','.zip','.7z','.rar','.iso')}
         }
@@ -136,6 +198,7 @@ function Invoke-RecycleCleanup([string]$Scope) {
     Write-Host 'Windows Storage Sense or other cleanup software may empty the bin independently.'
     $files = @(Get-CleanupCandidates $Scope | Sort-Object Path -Unique)
     if ($Scope -eq 'Deep') {
+        Show-StorageSummary
         Show-AppInventory
         if ($files.Count) { $files = @($files | Out-GridView -Title 'Select files to recycle, then click OK. Nothing is preselected.' -PassThru) }
     }
