@@ -88,9 +88,10 @@ class Regressions(unittest.TestCase):
         body = ':Dispatch\n' + menu[menu.index('if /I "%choice%"=="1"'):]
         body = body.replace('start "" "%SystemRoot%\\System32\\rstrui.exe"', 'call :OpenRestore')
         targets = set(re.findall(r'call :(\w+)', body)) | {'Menu', 'End'}
-        for choice, expected in [('1','FullOptimization'), ('2','PauseReturn'),
-                                 ('3','CreateRestorePoint'), ('R','OpenRestore'),
-                                 ('G','RunOperation'), ('M','MemoryIntegrityMenu'), ('0','End')]:
+        for choice, expected in [('1','FullOptimization'), ('2','FreeDiskSpace'),
+                                 ('3','RunOperation'), ('R','RecoveryMenu'),
+                                 ('P','ShowChangesSummary'), ('H','ShowHelp'),
+                                 ('G','PauseReturn'), ('M','PauseReturn'), ('0','End')]:
             with self.subTest(choice=choice):
                 result, trace, _ = self.run_batch(body, 'Dispatch',
                     extra=''.join(stub(target) for target in targets), env={'choice':choice})
@@ -143,12 +144,16 @@ class Regressions(unittest.TestCase):
                 self.assertEqual(events[0], 'WarnIfOnBattery')
                 if failure:
                     self.assertEqual(result.returncode, 1)
-                    self.assertNotIn('Debloat', events)
+                    self.assertNotIn('ApplyGamingTweaks', events)
                     self.assertEqual(events[-1], failure)
                 else:
                     self.assertEqual(result.returncode, 0)
-                    self.assertIn('ApplyGamingTweaks', events)
-                    self.assertIn('ShowChangesSummary', events)
+                    self.assertEqual(events, ['WarnIfOnBattery', 'PrepareOptimization',
+                        'DisableTouchFeatures', 'ApplyGamingTweaks', 'OptimizeServices',
+                        'ApplyNetworkTweaks', 'DisableAnimations', 'OptimizeStartup',
+                        'FreeDiskSpace', 'AdvancedGPUStorage', 'OptimizeAudio',
+                        'OptimizeMemory', 'OptimizePageFile', 'DisableCoreParking',
+                        'OptimizeStorageByType', 'ShowChangesSummary'])
 
     def test_restore_failure_requires_explicit_continue(self):
         body = mock_commands(routine('PrepareOptimization'))
@@ -182,15 +187,14 @@ class Regressions(unittest.TestCase):
 
     def test_full_run_visual_choice_controls_all_preliminary_visual_changes(self):
         body = mock_commands(routine('ApplyGamingTweaks'))
-        for full in ('', '1'):
-            result, trace, _ = self.run_batch(body, 'ApplyGamingTweaks',
-                extra=LOG + MOCK + stub('BackupRegistryKeys'),
-                env={'OPTIMIZER_FULL_RUN':full, 'DVR_PREF_SET':'1', 'DISABLE_DVR':'0'})
-            self.assertEqual(result.returncode, 0)
-            for setting in ('VisualFXSetting', 'EnableTransparency', 'MenuShowDelay'):
-                self.assertEqual(setting in trace, not bool(full))
-            self.assertIn('HwSchMode', trace)
-            self.assertIn('WaitToKillAppTimeout', trace)
+        result, trace, _ = self.run_batch(body, 'ApplyGamingTweaks',
+            extra=LOG + MOCK + stub('BackupRegistryKeys'),
+            env={'OPTIMIZER_FULL_RUN':'1', 'DVR_PREF_SET':'1', 'DISABLE_DVR':'0'})
+        self.assertEqual(result.returncode, 0)
+        for setting in ('VisualFXSetting', 'EnableTransparency', 'MenuShowDelay'):
+            self.assertNotIn(setting, trace)
+        self.assertIn('HwSchMode', trace)
+        self.assertIn('WaitToKillAppTimeout', trace)
         body = mock_commands(routine('DisableAnimations'))
         for choice in ('1', '2', '3'):
             result, trace, _ = self.run_batch(body, 'DisableAnimations', extra=LOG + MOCK + CHOOSE,
@@ -221,14 +225,14 @@ class Regressions(unittest.TestCase):
                 self.assertNotIn('FSEBehaviorMode', trace)
 
     def test_both_network_paths_enable_normal_window_growth(self):
-        for name in ['ApplyNetworkTweaksSafe', 'ApplyNetworkTweaks']:
+        for name in ['ApplyNetworkTweaks']:
             result, trace, _ = self.run_batch(mock_commands(routine(name)), name, extra=LOG + MOCK)
             self.assertEqual(result.returncode, 0)
             self.assertIn('autotuninglevel=normal', trace)
             self.assertNotIn('autotuninglevel=highlyrestricted', trace)
 
     def test_network_and_search_avoid_redundant_or_obsolete_changes(self):
-        for name in ['ApplyNetworkTweaksSafe','ApplyNetworkTweaks']:
+        for name in ['ApplyNetworkTweaks']:
             result, trace, _ = self.run_batch(mock_commands(routine(name)), name, extra=LOG + MOCK)
             self.assertEqual(result.returncode, 0)
             self.assertIn('Delivery Configure', trace)
@@ -275,23 +279,15 @@ class Regressions(unittest.TestCase):
                      'BAT_TEST': battery, 'CHOICE_CODE': selection})
             self.assertEqual(result.returncode, expected)
 
-    def test_network_menu_routes_all_options(self):
-        body = mock_commands(routine('NetworkMenu') + routine('NetworkOptions'))
-        choose = '''
-:Choose
-if defined CHOSEN exit /b 4
-set "CHOSEN=1"
-exit /b %CHOICE_CODE%
-'''
-        for selection, target in [(1, 'ApplyNetworkTweaksSafe'), (2, 'ApplyNetworkTweaks'),
-                                   (3, 'RevertNetworkTweaks'), (4, None)]:
-            result, trace, _ = self.run_batch(body, 'NetworkMenu', extra=choose +
-                ''.join(stub(n) for n in ['ApplyNetworkTweaksSafe', 'ApplyNetworkTweaks',
-                                          'RevertNetworkTweaks', 'PauseReturn']),
-                prelude='set "CHOSEN="\n', env={'CHOICE_CODE': str(selection)})
+    def test_recovery_routes_only_the_selected_action(self):
+        body = mock_commands(routine('RecoveryMenu')).replace('start "" "%SystemRoot%\\System32\\rstrui.exe"', 'call :OpenRestore')
+        targets = ['CreateRestorePoint','OpenRestore','UndoChanges','MemoryIntegrityMenu','PauseReturn']
+        for selection, target in [(1,'CreateRestorePoint'), (2,'OpenRestore'),
+                                  (3,'UndoChanges'), (4,'MemoryIntegrityMenu'), (5,None)]:
+            result, trace, _ = self.run_batch(body, 'RecoveryMenu', extra=CHOOSE +
+                ''.join(stub(n) for n in targets), env={'CHOICE_CODE':str(selection)})
             self.assertEqual(result.returncode, 0)
-            events = trace.splitlines()
-            self.assertEqual(events, [target, 'PauseReturn'] if target else [])
+            self.assertEqual(trace.splitlines(), ([target] + ([] if selection == 2 else ['PauseReturn'])) if target else [])
 
     def test_undo_is_opt_in_and_never_enables_remote_services(self):
         body = mock_commands(routine('UndoChanges'))
@@ -313,7 +309,7 @@ exit /b %CHOICE_CODE%
         self.assertIn(r'\Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser', trace)
 
     def test_cleanup_routes_only_to_recycling_and_app_inventory(self):
-        for name, operation in [('FreeDiskSpace','Cleanup Safe'), ('Debloat','Apps Review')]:
+        for name, operation in [('FreeDiskSpace','Cleanup Safe')]:
             result, trace, _ = self.run_batch(mock_commands(routine(name)), name, extra=LOG + MOCK)
             self.assertEqual(result.returncode, 0)
             self.assertIn(operation, trace)

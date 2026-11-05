@@ -85,27 +85,12 @@ if errorlevel 1 (
     exit /b 1
 )
 call :Log "Awaiting menu selection"
-echo    %CLR_MENU%[1 / F]%CLR_RESET% FULL OPTIMIZATION - All gaming tweaks in one run
-echo    %CLR_MENU%[3]%CLR_RESET% Set up protection and create restore point
-echo    %CLR_MENU%[R]%CLR_RESET% Open Windows System Restore
-echo    %CLR_MENU%[4]%CLR_RESET% Review installed apps (no uninstall)
-echo    %CLR_MENU%[5]%CLR_RESET% Disable touchscreen, pen, and ink features
-echo    %CLR_MENU%[6]%CLR_RESET% Gaming settings - includes memory integrity OFF
-echo    %CLR_MENU%[7]%CLR_RESET% Optimize services, telemetry, and indexing
-echo    %CLR_MENU%[8]%CLR_RESET% Network optimizations (apply/revert)
-echo    %CLR_MENU%[9]%CLR_RESET% Disable animations and visual effects
-echo    %CLR_MENU%[A]%CLR_RESET% Optimize startup programs and services
-echo    %CLR_MENU%[B]%CLR_RESET% Recycle user temporary files older than 30 days
-echo    %CLR_MENU%[C]%CLR_RESET% Advanced: GPU and storage optimizations
-echo    %CLR_MENU%[D]%CLR_RESET% Advanced: Audio latency reduction
-echo    %CLR_MENU%[E]%CLR_RESET% Optional: Disable Xbox services (breaks Game Bar)
-echo    %CLR_MENU%[J]%CLR_RESET% Deeper cleanup - select files to recycle
-echo    %CLR_MENU%[G]%CLR_RESET% Check display refresh and GPU preferences
-echo    %CLR_MENU%[M]%CLR_RESET% Memory integrity on/off
-echo    %CLR_MENU%[H]%CLR_RESET% Help / README
-echo    %CLR_MENU%[P]%CLR_RESET% View operation results
-echo    %CLR_MENU%[V]%CLR_RESET% Verify optimizations status
-echo    %CLR_MENU%[U]%CLR_RESET% UNDO - Partial rollback of key settings
+echo    %CLR_MENU%[1]%CLR_RESET% Full optimization - all gaming tweaks
+echo    %CLR_MENU%[2]%CLR_RESET% Quick cleanup - recycle old temporary files
+echo    %CLR_MENU%[3]%CLR_RESET% Deep cleanup - storage review and file cleanup
+echo    %CLR_MENU%[R]%CLR_RESET% Recovery - restore points, undo, memory integrity
+echo    %CLR_MENU%[P]%CLR_RESET% Results from this session
+echo    %CLR_MENU%[H]%CLR_RESET% Help
 echo    %CLR_MENU%[0]%CLR_RESET% Exit
 set "choice="
 set /p "choice=> "
@@ -113,31 +98,30 @@ set "choice=%choice:~0,1%"
 set "OPTIMIZER_ACTION_ID=%RANDOM%-%RANDOM%"
 if /I "%choice%"=="P" set "OPTIMIZER_ACTION_ID="
 if /I "%choice%"=="1" (call :FullOptimization & call :PauseReturn & goto Menu)
-if /I "%choice%"=="F" (call :FullOptimization & call :PauseReturn & goto Menu)
-if /I "%choice%"=="3" (call :CreateRestorePoint & call :PauseReturn & goto Menu)
-if /I "%choice%"=="R" (start "" "%SystemRoot%\System32\rstrui.exe" & goto Menu)
-if /I "%choice%"=="4" (call :Debloat & call :PauseReturn & goto Menu)
-if /I "%choice%"=="5" (call :DisableTouchFeatures & call :PauseReturn & goto Menu)
-if /I "%choice%"=="6" (call :GamingTweaksMenu & call :PauseReturn & goto Menu)
-if /I "%choice%"=="7" (call :OptimizeServices & call :PauseReturn & goto Menu)
-if /I "%choice%"=="8" (call :NetworkMenu & goto Menu)
-if /I "%choice%"=="9" (call :DisableAnimations & call :PauseReturn & goto Menu)
-if /I "%choice%"=="A" (call :OptimizeStartup & call :PauseReturn & goto Menu)
-if /I "%choice%"=="B" (call :FreeDiskSpace & call :PauseReturn & goto Menu)
-if /I "%choice%"=="C" (call :AdvancedGPUStorage & call :PauseReturn & goto Menu)
-if /I "%choice%"=="D" (call :OptimizeAudio & call :PauseReturn & goto Menu)
-if /I "%choice%"=="E" (call :DisableXboxServices & call :PauseReturn & goto Menu)
-if /I "%choice%"=="J" (call :RunOperation Cleanup Deep & call :PauseReturn & goto Menu)
-if /I "%choice%"=="G" (call :RunOperation Graphics Check & call :PauseReturn & goto Menu)
-if /I "%choice%"=="M" (call :MemoryIntegrityMenu & call :PauseReturn & goto Menu)
+if /I "%choice%"=="2" (call :FreeDiskSpace & call :PauseReturn & goto Menu)
+if /I "%choice%"=="3" (call :RunOperation Cleanup Deep & call :PauseReturn & goto Menu)
+if /I "%choice%"=="R" (call :RecoveryMenu & goto Menu)
 if /I "%choice%"=="H" (call :ShowHelp & call :PauseReturn & goto Menu)
 if /I "%choice%"=="P" (call :ShowChangesSummary & call :PauseReturn & goto Menu)
-if /I "%choice%"=="V" (call :VerifyOptimizations & call :PauseReturn & goto Menu)
-if /I "%choice%"=="U" (call :UndoChanges & call :PauseReturn & goto Menu)
 if "%choice%"=="0" goto End
 echo [!] Unknown selection. Please try again.
 call :PauseReturn
 goto Menu
+
+:RecoveryMenu
+echo   %CLR_TITLE%RECOVERY%CLR_RESET%
+echo   [1] Create a restore point
+echo   [2] Open Windows System Restore
+echo   [3] Partial undo - reset selected settings
+echo   [4] Memory integrity on/off
+echo   [0] Back
+choice /c 12340 /n /m "Select: "
+set "recovery_choice=%errorlevel%"
+if "%recovery_choice%"=="1" (call :CreateRestorePoint & call :PauseReturn)
+if "%recovery_choice%"=="2" start "" "%SystemRoot%\System32\rstrui.exe"
+if "%recovery_choice%"=="3" (call :UndoChanges & call :PauseReturn)
+if "%recovery_choice%"=="4" (call :MemoryIntegrityMenu & call :PauseReturn)
+exit /b 0
 
 :FullOptimization
 call :Log "Running FULL optimization sequence"
@@ -164,9 +148,7 @@ call :OptimizeStartup
 echo [*] Step 7/13: Recycling old temporary files...
 call :FreeDiskSpace
 echo [*] Step 8/13: GPU and storage optimizations...
-set "AUTO_ADVANCED_CONFIRM=1"
 call :AdvancedGPUStorage
-set "AUTO_ADVANCED_CONFIRM="
 echo [*] Step 9/13: Audio latency reduction...
 call :OptimizeAudio
 echo [*] Step 10/13: Finalizing memory optimizations...
@@ -211,26 +193,8 @@ if errorlevel 1 (
     call :Log "Restore point setup or creation failed"
     exit /b 1
 )
-echo [+] Restore point created and verified. Use menu R to open System Restore.
+echo [+] Restore point created and verified. Use Recovery, then System Restore, to revert.
 exit /b 0
-
-:ApplyNetworkTweaksSafe
-call :Log "Applying SAFE network tweaks"
-if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%APPLYING SAFE NETWORK OPTIMIZATIONS%CLR_RESET%
-if not defined OPTIMIZER_FULL_RUN echo [*] Applying low-risk tweaks for gaming (keeps Windows TCP defaults)...
-REM Restore normal receive-window growth, including after older Full runs.
-call :RunOperation Native netsh interface tcp set global autotuninglevel=normal
-call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpNoDelay /t REG_DWORD /d 1 /f
-call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpAckFrequency /t REG_DWORD /d 1 /f
-
-call :RunOperation Delivery Configure
-
-call :Log "Safe network changes attempted; see results"
-exit /b 0
-
-:Debloat
-call :RunOperation Apps Review
-exit /b %errorlevel%
 
 :DisableTouchFeatures
 call :Log "Disabling touch/pen stack"
@@ -262,12 +226,6 @@ if errorlevel 2 (
 ) else (
     call :RunOperation Integrity Off
 )
-exit /b %errorlevel%
-
-:GamingTweaksMenu
-call :WarnIfOnBattery
-if errorlevel 1 exit /b 1
-call :ApplyGamingTweaks
 exit /b %errorlevel%
 
 :ApplyGamingTweaks
@@ -305,11 +263,6 @@ if "%DISABLE_DVR%"=="1" (
 )
 
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" /v HwSchMode /t REG_DWORD /d 2 /f
-if not defined OPTIMIZER_FULL_RUN (
-    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 0 /f
-    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" /v VisualFXSetting /t REG_DWORD /d 2 /f
-    call :RunOperation Registry reg add "HKCU\Control Panel\Desktop" /v MenuShowDelay /t REG_SZ /d 0 /f
-)
 call :RunOperation Registry reg add "HKCU\Control Panel\Desktop" /v WaitToKillAppTimeout /t REG_SZ /d 2000 /f
 call :RunOperation Registry reg add "HKCU\Control Panel\Desktop" /v HungAppTimeout /t REG_SZ /d 1000 /f
 call :Log "Gaming tweaks: scheduler priorities"
@@ -398,23 +351,6 @@ call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\Cl
 call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\CloudContent" /v DisableWindowsSpotlightFeatures /t REG_DWORD /d 1 /f
 call :Log "Service/telemetry attempts finished; see results"
 exit /b 0
-
-:NetworkMenu
-:NetworkOptions
-cls
-if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%NETWORK OPTIMIZATION MENU%CLR_RESET%
-echo    %CLR_MENU%[1]%CLR_RESET% Apply SAFE network tweaks
-echo    %CLR_MENU%[2]%CLR_RESET% Apply AGGRESSIVE tweaks - may affect VPN/throughput
-echo    %CLR_MENU%[3]%CLR_RESET% Revert network tweaks to defaults
-echo    %CLR_MENU%[4]%CLR_RESET% Return to main menu
-choice /c 1234 /n /m "Select an option: "
-set "netopt=%errorlevel%"
-if "%netopt%"=="4" exit /b 0
-if "%netopt%"=="1" call :ApplyNetworkTweaksSafe
-if "%netopt%"=="2" call :ApplyNetworkTweaks
-if "%netopt%"=="3" call :RevertNetworkTweaks
-call :PauseReturn
-goto NetworkOptions
 
 :ApplyNetworkTweaks
 call :Log "Applying network tweaks"
@@ -595,15 +531,6 @@ exit /b 0
 :AdvancedGPUStorage
 call :Log "Applying GPU and storage optimizations"
 if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%ADVANCED GPU AND STORAGE OPTIMIZATIONS%CLR_RESET%
-if not "%AUTO_ADVANCED_CONFIRM%"=="1" (
-    set "advConfirm="
-    set /p "advConfirm=These tweaks are aggressive and hardware-dependent. Continue? (Y/N): "
-    if /I not "!advConfirm!"=="Y" (
-        echo [!] Advanced GPU/storage optimizations skipped.
-        call :Log "User skipped advanced GPU/storage tweaks"
-        exit /b 0
-    )
-)
 if not defined OPTIMIZER_FULL_RUN echo [*] Applying GPU optimizations (NVIDIA/AMD agnostic)...
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultD3TransitionLatencyActivelyUsed /t REG_DWORD /d 0 /f
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultD3TransitionLatencyIdleLongTime /t REG_DWORD /d 1 /f
@@ -655,47 +582,13 @@ call :Log "Audio changes attempted; see results"
 if not defined OPTIMIZER_FULL_RUN echo     %CLR_WARNING%Tip:%CLR_RESET% In Sound settings, enable Exclusive Mode for gaming headset.
 exit /b 0
 
-:DisableXboxServices
-call :Log "Disabling Xbox services"
-if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%DISABLE XBOX SERVICES%CLR_RESET%
-echo   %CLR_WARNING%WARNING:%CLR_RESET% This will disable:
-echo   - Xbox Game Bar (Win+G)
-echo   - Xbox app and Game Pass integration
-echo   - Xbox Live cloud saves
-echo   - Some Xbox controller features
-echo   Only proceed if you DON'T use these features!
-set /p "confirm=Type YES to disable Xbox services: "
-if /I not "!confirm!"=="YES" (
-    echo [!] Xbox services NOT disabled (user cancelled).
-    call :Log "User cancelled Xbox service disable"
-    exit /b 0
-)
-if not defined OPTIMIZER_FULL_RUN echo [*] Disabling Xbox-related services...
-call :RunOperation Service sc stop "XblAuthManager"
-call :RunOperation Service sc config "XblAuthManager" start= disabled
-call :RunOperation Service sc stop "XblGameSave"
-call :RunOperation Service sc config "XblGameSave" start= disabled
-call :RunOperation Service sc stop "XboxGipSvc"
-call :RunOperation Service sc config "XboxGipSvc" start= disabled
-call :RunOperation Service sc stop "XboxNetApiSvc"
-call :RunOperation Service sc config "XboxNetApiSvc" start= disabled
-call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\xbgm" /v Start /t REG_DWORD /d 4 /f
-
-call :Log "Xbox service changes attempted; see results"
-echo     To re-enable, use the UNDO option or run:
-echo     sc config XblAuthManager start= demand
-echo     sc config XblGameSave start= demand
-exit /b 0
-
-
 :ShowHelp
-echo Full optimization attempts a restore point before making changes.
-echo Individual actions do not create a restore point automatically. File cleanup only recycles.
-echo Review [P] Operation results for failures and restart requirements.
-echo [V] checks selected live settings; it is not a performance score.
-echo Spotify is preserved. Xbox services change only if you choose [E].
-echo [U] is a partial reset, not a restoration of your original settings.
-echo Deleted files and removed apps cannot be recovered with [U].
+echo Full optimization includes gaming, network, visual, startup, and quick cleanup changes.
+echo Quick cleanup recycles old temporary files. Deep cleanup reviews storage and more files.
+echo Full creates a restore point first. Recovery contains restore and partial undo options.
+echo Full disables memory integrity; re-enable it in Recovery if needed.
+echo Apps stay installed. Recycled files occupy space until you empty the Recycle Bin.
+echo Results show failures and restart requirements. Partial undo is not a full restore.
 echo Full documentation: %SCRIPT_DIR%README.md
 echo Log files: %LOG_DIR%
 exit /b 0
@@ -842,7 +735,6 @@ if defined RAM_GB echo   RAM: %RAM_GB% GB ^| Storage: %STORAGE_TYPE%
 if "%IS_LAPTOP%"=="1" echo   %CLR_WARNING%[!]%CLR_RESET% System Type: %CHASSIS_TYPE% - Battery impact warning enabled
 echo   %CLR_WARNING%[!]%CLR_RESET% Run as administrator. Changes logged to:
 echo       %LOG_FILE%
-echo   %CLR_SUBTITLE%[H] Help/README ^| [P] Report ^| [V] Verify ^| [U] Undo%CLR_RESET%
 exit /b 0
 
 :PauseReturn
@@ -999,101 +891,6 @@ exit /b 0
 set "RESULT_SUMMARY_SHOWN=1"
 "%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -File "%OPERATIONS_SCRIPT%" -Mode Summary
 exit /b %errorlevel%
-
-:VerifyOptimizations
-call :Log "Running verification check"
-cls
-if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%LIMITED CONFIGURATION CHECKS%CLR_RESET%
-echo   These legacy checks cover only selected registry and service values.
-echo   Use the operation results for failures, unsupported settings and restart requirements.
-set "VERIFY_PASS=0"
-set "VERIFY_FAIL=0"
-
-echo   %CLR_SUBTITLE%Power Plan:%CLR_RESET%
-powercfg /getactivescheme
-echo     Portable/Modern Standby PCs retain their plan; see AC power mode in operation results.
-
-echo   %CLR_SUBTITLE%Game Mode:%CLR_RESET%
-reg query "HKCU\Software\Microsoft\GameBar" /v AutoGameModeEnabled 2>nul | findstr "0x1" >nul
-if not errorlevel 1 (
-    echo     %CLR_SUCCESS%[PASS]%CLR_RESET% Game Mode enabled
-    set /a VERIFY_PASS+=1
-) else (
-    echo     %CLR_WARNING%[WARN]%CLR_RESET% Game Mode not enabled
-    set /a VERIFY_FAIL+=1
-)
-
-echo   %CLR_SUBTITLE%GPU Scheduling:%CLR_RESET%
-reg query "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" /v HwSchMode 2>nul | findstr "0x2" >nul
-if not errorlevel 1 (
-    echo     %CLR_SUCCESS%[PASS]%CLR_RESET% GPU scheduling registry preference is enabled
-    set /a VERIFY_PASS+=1
-) else (
-    echo     %CLR_WARNING%[WARN]%CLR_RESET% GPU scheduling not enabled
-    set /a VERIFY_FAIL+=1
-)
-
-echo   %CLR_SUBTITLE%Telemetry:%CLR_RESET%
-sc query DiagTrack | findstr "STOPPED" >nul 2>&1
-if not errorlevel 1 (
-    echo     %CLR_SUCCESS%[PASS]%CLR_RESET% Diagnostic tracking disabled
-    set /a VERIFY_PASS+=1
-) else (
-    echo     %CLR_WARNING%[WARN]%CLR_RESET% Diagnostic tracking still running
-    set /a VERIFY_FAIL+=1
-)
-
-echo   %CLR_SUBTITLE%Visual Effects:%CLR_RESET%
-reg query "HKCU\Software\Microsoft\Windows\DWM" /v EnableAeroPeek 2>nul | findstr "0x0" >nul
-if not errorlevel 1 (
-    echo     %CLR_SUCCESS%[PASS]%CLR_RESET% Visual effects optimized (Aero Peek disabled)
-    set /a VERIFY_PASS+=1
-) else (
-    echo     %CLR_WARNING%[WARN]%CLR_RESET% Visual effects not optimized
-    set /a VERIFY_FAIL+=1
-)
-
-echo   %CLR_SUBTITLE%Network:%CLR_RESET%
-reg query "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpNoDelay 2>nul | findstr "0x1" >nul
-if not errorlevel 1 (
-    echo     %CLR_SUCCESS%[PASS]%CLR_RESET% TCP optimizations applied
-    set /a VERIFY_PASS+=1
-) else (
-    echo     %CLR_WARNING%[WARN]%CLR_RESET% Network not optimized
-    for %%V in (TcpNoDelay TcpAckFrequency) do (
-        for /f "tokens=*" %%R in ('reg query "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v %%V 2^>nul') do echo     %%R
-    )
-    set /a VERIFY_FAIL+=1
-)
-
-echo   %CLR_SUBTITLE%Startup:%CLR_RESET%
-reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize" /v StartupDelayInMSec 2>nul | findstr "0x0" >nul
-if not errorlevel 1 (
-    echo     %CLR_SUCCESS%[PASS]%CLR_RESET% Startup delay removed
-    set /a VERIFY_PASS+=1
-) else (
-    echo     %CLR_WARNING%[WARN]%CLR_RESET% Startup delay present
-    set /a VERIFY_FAIL+=1
-)
-
-echo   %CLR_SUBTITLE%Core Parking:%CLR_RESET%
-"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command ". $env:OPERATIONS_SCRIPT -NoRun; if (Test-ManagedCoreParking) { if ((Get-ActivePowerScheme) -eq [guid]'381b4222-f694-41f0-9685-ff5bb260df2e') { exit 0 }; exit 1 }; if ((Get-ACPowerValue (Get-ActivePowerScheme) '54533251-82be-4824-96c1-47b60b740d00' '0cc5b647-c1df-4637-891a-dec35c318583') -eq 100) { exit 0 }; exit 1" >nul 2>&1
-if not errorlevel 1 (
-    echo     %CLR_SUCCESS%[PASS]%CLR_RESET% Core parking matches this processor's policy
-    set /a VERIFY_PASS+=1
-) else (
-    echo     %CLR_WARNING%[WARN]%CLR_RESET% Core parking needs review
-    set /a VERIFY_FAIL+=1
-)
-
-if not defined OPTIMIZER_FULL_RUN echo   %CLR_TITLE%LIMITED CHECK SUMMARY - NOT A PERFORMANCE SCORE%CLR_RESET%
-echo   Selected checks: %CLR_SUCCESS%%VERIFY_PASS% matched%CLR_RESET%, %CLR_WARNING%%VERIFY_FAIL% need review%CLR_RESET%.
-if %VERIFY_FAIL% GTR 0 (
-    echo   Checks Failed: %CLR_WARNING%[%VERIFY_FAIL%/%VERIFY_TOTAL%]%CLR_RESET%
-    echo   %CLR_WARNING%Recommendation:%CLR_RESET% Run option [1] FULL or [6] Gaming Tweaks
-)
-call :Log "Verification: %VERIFY_PASS% passed, %VERIFY_FAIL% failed"
-exit /b 0
 
 :RunOperation
 set "RESULT_SUMMARY_SHOWN="

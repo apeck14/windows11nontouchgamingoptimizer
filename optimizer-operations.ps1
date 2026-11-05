@@ -425,7 +425,7 @@ function New-OptimizerRestorePoint {
             Remove-ItemProperty -LiteralPath $key -Name $name -ErrorAction Stop
         }
     }
-    Write-OperationResult Applied 'System restore point' "Verified #$($point[0].SequenceNumber): $description. Open System Restore with menu R or rstrui.exe." $true
+    Write-OperationResult Applied 'System restore point' "Verified #$($point[0].SequenceNumber): $description. Open System Restore from Recovery or run rstrui.exe." $true
 }
 
 function Enable-WindowedOptimizations {
@@ -643,7 +643,7 @@ function Show-OperationSummary {
     } | Sort-Object -Unique)
     if ($areas.Count) { Write-Host ('Updated: '+($areas -join '; ')) -ForegroundColor Green }
     else { Write-Host 'No new configuration changes confirmed.' }
-    if (@($changed | Where-Object Operation -eq 'System restore point').Count) { Write-Host 'Restore point: created and verified. Use R to restore.' -ForegroundColor Green }
+    if (@($changed | Where-Object Operation -eq 'System restore point').Count) { Write-Host 'Restore point: created and verified. Use Recovery to restore.' -ForegroundColor Green }
     $recycled = @($changed | Where-Object Operation -like 'Recycle *')
     if ($recycled.Count) {
         $gb = ($recycled | Measure-Object Bytes -Sum).Sum / 1GB
@@ -678,7 +678,6 @@ function Invoke-Operation {
             Service { Invoke-ServiceChange $tokens[1..($tokens.Count-1)] }
             Task { Invoke-TaskChange $tokens[1..($tokens.Count-1)] }
             Feature { Invoke-FeatureChange $tokens[1] $tokens[2] }
-            Apps { . (Join-Path $PSScriptRoot 'optimizer-cleanup.ps1'); Show-AppInventory }
             Cleanup { . (Join-Path $PSScriptRoot 'optimizer-cleanup.ps1'); Invoke-RecycleCleanup $tokens[1] }
             Memory { Invoke-MemoryChange $tokens[1] ($tokens[2] -eq '1') }
             Pagefile { Invoke-PagefileChange $tokens[1] }
