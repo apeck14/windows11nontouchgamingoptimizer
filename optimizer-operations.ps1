@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Operation', 'Summary', 'Record', 'Initialize')][string]$Mode = 'Operation',
+    [ValidateSet('Operation', 'Summary', 'Initialize')][string]$Mode = 'Operation',
     [switch]$NoRun
 )
 
@@ -596,10 +596,6 @@ try {
         exit 0
     }
     if ($Mode -eq 'Summary') { exit (Show-OperationSummary) }
-    if ($Mode -eq 'Record') {
-        Write-OperationResult $env:OPTIMIZER_STATUS $env:OPTIMIZER_LABEL $env:OPTIMIZER_DETAIL ($env:OPTIMIZER_VERIFIED -eq '1')
-        exit 0
-    }
     exit (Invoke-Operation $env:OPTIMIZER_OPERATION)
 } catch {
     Write-Error "Result handling failed: $_" -ErrorAction Continue

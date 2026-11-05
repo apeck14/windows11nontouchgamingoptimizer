@@ -1306,15 +1306,6 @@ set "OPTIMIZER_OPERATION=%*"
 "%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -File "%OPERATIONS_SCRIPT%"
 exit /b %errorlevel%
 
-:RecordOperation
-set "RESULT_SUMMARY_SHOWN="
-set "OPTIMIZER_STATUS=%~1"
-set "OPTIMIZER_LABEL=%~2"
-set "OPTIMIZER_DETAIL=%~3"
-set "OPTIMIZER_VERIFIED=%~4"
-"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -File "%OPERATIONS_SCRIPT%" -Mode Record
-exit /b %errorlevel%
-
 :Log
 set "MESSAGE=%~1"
 echo %DATE% %TIME% - !MESSAGE!
