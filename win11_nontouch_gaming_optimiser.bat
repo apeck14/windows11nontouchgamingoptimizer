@@ -6,7 +6,7 @@ set "REGISTRY_BACKUP_DONE="
 set "OPTIMIZER_FULL_RUN="
 pushd "%SCRIPT_DIR%" >nul 2>&1
 
-title Windows 11 Non-Touch Gaming Optimizer - by Matt Hurley
+title Windows 11 Gaming Optimizer
 color 0A
 
 for /f %%A in ('"prompt $E & for %%B in (1) do rem"') do set "ESC=%%A"
@@ -25,8 +25,6 @@ if defined ESC (
     set "CLR_WARNING="
     set "CLR_RESET="
 )
-
-:: Originally by Matt Hurley; see README.md and LICENSE.
 
 set "POWERSHELL=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 
@@ -67,7 +65,7 @@ if errorlevel 1 (
     echo [!] Cannot write the operation journal. No optimizations will be attempted.
     exit /b 1
 )
-call :Log "=== Windows 11 Non-Touch Gaming Optimizer started ==="
+call :Log "=== Windows 11 Gaming Optimizer started ==="
 
 call :DetectHardware
 call :DetectChassisType
@@ -659,8 +657,7 @@ if defined ENSURE_SHADOW_ERROR (
 exit /b 0
 
 :Banner
-echo %CLR_TITLE%           WINDOWS 11 GAMING OPTIMIZER v2.5                      %CLR_RESET%
-echo %CLR_SUBTITLE%                         by Matt Hurley%CLR_RESET%
+echo %CLR_TITLE%           WINDOWS 11 GAMING OPTIMIZER                      %CLR_RESET%
 echo   %CLR_SUCCESS%[*]%CLR_RESET% Maximize FPS ^| Reduce Latency ^| Optimize Performance
 if defined GPU_VENDOR echo   %CLR_SUCCESS%[*]%CLR_RESET% Detected GPU: %GPU_VENDOR%
 if defined CPU_VENDOR echo   %CLR_SUCCESS%[*]%CLR_RESET% Detected CPU: %CPU_VENDOR%
