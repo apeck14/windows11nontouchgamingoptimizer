@@ -25,6 +25,99 @@ class OperationResults(unittest.TestCase):
             rows = [json.loads(line) for line in journal.read_text(encoding='utf-8-sig').splitlines()] if journal.exists() else []
             return rows, result.stdout
 
+
+    def test_managed_cpu_detection_and_parking_preserves_driver_control(self):
+        rows, _ = self.run_case(r'''
+$script:cpu=''
+function Get-CimInstance {param($ClassName,$ErrorAction) [pscustomobject]@{Name=$script:cpu}}
+foreach($name in @('AMD Ryzen 9 7950X3D 16-Core Processor','AMD Ryzen 9 9900X','AMD Ryzen 9 9950X','AMD Ryzen 9 9950X3D','AMD Ryzen 9 7945HX3D')) {
+    $script:cpu=$name
+    if(-not (Test-ManagedCoreParking)){throw "Missed managed CPU: $name"}
+}
+foreach($name in @('AMD Ryzen 7 5800X3D','AMD Ryzen 7 9800X3D','AMD Ryzen 9 7950X','Intel Core i9-14900K')) {
+    $script:cpu=$name
+    if(Test-ManagedCoreParking){throw "Unexpected managed CPU: $name"}
+}
+$script:cpu='AMD Ryzen 9 7950X3D'
+function Invoke-NativeOperation {throw 'Must preserve driver parking'}
+$null=Invoke-Operation 'Parking Configure'
+''')
+        self.assertEqual([r['Status'] for r in rows], ['AlreadyConfigured'])
+
+    def test_managed_cpu_selects_balanced_without_creating_or_deleting_plans(self):
+        rows, _ = self.run_case(r'''
+function Test-ManagedCoreParking {$true}
+function Get-PowerCapabilities {@{ModernStandby=$false;Portable=$false}}
+$script:active=[guid]'11111111-1111-1111-1111-111111111111'
+function Get-ActivePowerScheme {$script:active}
+function Get-ACPowerMode {[guid]'ded574b5-45a0-4f42-8737-46345c09c238'}
+function Get-PerformancePlans {throw 'Must not enumerate or delete desktop plans'}
+function Invoke-NativeOperation {param($Program,$Arguments)
+    if($Arguments[0] -ne '-setactive' -or $Arguments[1] -ne '381b4222-f694-41f0-9685-ff5bb260df2e'){throw 'Unexpected power mutation'}
+    $script:active=[guid]$Arguments[1]
+    [pscustomobject]@{Code=0;Output='localized output'}
+}
+$null=Invoke-Operation 'Plan Ultimate'
+$null=Invoke-Operation 'Plan Ultimate'
+''')
+        self.assertEqual([r['Status'] for r in rows], ['Applied','AlreadyConfigured','AlreadyConfigured','AlreadyConfigured'])
+
+
+    def test_core_parking_uses_active_guid_and_reactivates_settings(self):
+        self.run_case(r'''
+function Test-ManagedCoreParking {$false}
+$guid=[guid]'11111111-2222-3333-4444-555555555555'
+function Get-ActivePowerScheme {$guid}
+$script:changed=$false; $script:activated=$false
+function Invoke-GenericChange {param($Tokens)
+    if(($Tokens -join ' ') -ne "powercfg -setacvalueindex $guid SUB_PROCESSOR CPMINCORES 100"){throw 'Wrong plan updated'}
+    $script:changed=$true
+}
+function Invoke-NativeOperation {param($Program,$Arguments)
+    if(-not $script:changed -or ($Arguments -join ' ') -ne "-setactive $guid"){throw 'Wrong activation order or plan'}
+    $script:activated=$true
+    [pscustomobject]@{Code=0;Output=''}
+}
+Set-GamingCoreParking
+if(-not $script:activated){throw 'Settings not activated'}
+''')
+
+    def test_user_context_rejects_other_or_unknown_desktop_owner(self):
+        self.run_case(r'''
+function Get-CurrentUserSid {'S-1-5-21-100'}
+$script:owners=@('S-1-5-21-100')
+function Get-DesktopUserSids {$script:owners}
+Assert-UserContext
+foreach($owners in @(@('S-1-5-21-200'),@(),@('S-1-5-21-100','S-1-5-21-200'))) {
+    $script:owners=$owners
+    $failed=$false
+    try {Assert-UserContext} catch {$failed=$true}
+    if(-not $failed){throw 'Wrong/unknown user was accepted'}
+}
+''')
+
+    def test_storage_tracks_windows_volume_and_rejects_ambiguous_media(self):
+        self.run_case(r'''
+$env:SystemDrive='D:'
+function Get-Partition {param($DriveLetter,$ErrorAction)
+    if($DriveLetter -ne 'D'){throw 'Wrong volume queried'}
+    [pscustomobject]@{DiskNumber=3}
+}
+function Get-Disk {param([Parameter(ValueFromPipeline=$true)]$InputObject)
+    process {
+        if($InputObject.DiskNumber -ne 3){throw 'Wrong disk queried'}
+        [pscustomobject]@{Number=3;UniqueId='os-disk';SerialNumber='serial-3'}
+    }
+}
+$script:physical=@([pscustomobject]@{DeviceID=0;UniqueId='other';SerialNumber='other';MediaType='HDD'},[pscustomobject]@{DeviceID=3;UniqueId='os-disk';SerialNumber='serial-3';MediaType='SSD'})
+function Get-PhysicalDisk {$script:physical}
+if((Get-SystemStorageType) -ne 'SSD'){throw 'Used disk zero instead of Windows disk'}
+$script:physical=@($script:physical[0])
+if((Get-SystemStorageType) -ne 'Unknown'){throw 'Guessed unmatched disk'}
+$script:physical=@([pscustomobject]@{UniqueId='os-disk';MediaType='SSD'},[pscustomobject]@{UniqueId='os-disk';MediaType='HDD'})
+if((Get-SystemStorageType) -ne 'Unknown'){throw 'Guessed ambiguous disk'}
+''')
+
     def test_registry_already_applied_noop_and_native_failure(self):
         rows, _ = self.run_case(r'''
 $script:value=0
@@ -215,6 +308,8 @@ if((Get-Content -Raw $env:LOG_FILE) -notmatch 'Raw native dump'){throw 'Diagnost
 
     def test_power_plan_reuses_active_copy_removes_only_duplicates_and_is_repeatable(self):
         rows, _ = self.run_case(r'''
+function Test-ManagedCoreParking {$false}
+function Get-ActivePowerScheme { (Invoke-NativeOperation powercfg @('/getactivescheme')).Output }
 function Get-PowerCapabilities {@{ModernStandby=$false;Portable=$false}}
 $a='11111111-1111-1111-1111-111111111111'; $b='22222222-2222-2222-2222-222222222222'; $c='33333333-3333-3333-3333-333333333333'
 $script:plans=@(
@@ -239,6 +334,8 @@ if($script:plans.Count -ne 2 -or $script:plans.Id -notcontains $c){throw 'Custom
 
     def test_power_plan_is_created_only_when_missing(self):
         rows, _ = self.run_case(r'''
+function Test-ManagedCoreParking {$false}
+function Get-ActivePowerScheme { (Invoke-NativeOperation powercfg @('/getactivescheme')).Output }
 function Get-PowerCapabilities {@{ModernStandby=$false;Portable=$false}}
 $script:plans=@(); $script:active='381b4222-f694-41f0-9685-ff5bb260df2e'; $script:created=0
 function Get-PerformancePlans {$script:plans}
@@ -260,6 +357,8 @@ if($script:created -ne 1 -or $script:plans[0].Name -ne 'Gaming Optimizer'){throw
 
     def test_power_plan_rename_noop_is_not_reported_as_verified(self):
         rows, _ = self.run_case(r'''
+function Test-ManagedCoreParking {$false}
+function Get-ActivePowerScheme { (Invoke-NativeOperation powercfg @('/getactivescheme')).Output }
 function Get-PowerCapabilities {@{ModernStandby=$false;Portable=$false}}
 $script:plans=@()
 function Get-PerformancePlans {$script:plans}
@@ -275,6 +374,8 @@ $null=Invoke-Operation 'Plan Ultimate'
 
     def test_power_plan_activation_failure_never_deletes_other_plans(self):
         rows, _ = self.run_case(r'''
+function Test-ManagedCoreParking {$false}
+function Get-ActivePowerScheme { (Invoke-NativeOperation powercfg @('/getactivescheme')).Output }
 function Get-PowerCapabilities {@{ModernStandby=$false;Portable=$false}}
 function Get-PerformancePlans {@(
     [pscustomobject]@{Id='11111111-1111-1111-1111-111111111111';Name='Ultimate Performance';Active=$false},
@@ -323,6 +424,7 @@ $script:valid=$false; $null=Invoke-Operation $op
     def test_power_setting_uses_effective_value_without_rewriting_it(self):
         rows, _ = self.run_case(r'''
 $guid='11111111-2222-3333-4444-555555555555'
+function Get-ActivePowerScheme {$guid}
 function Invoke-NativeOperation {param($Program,$Arguments)
     if($Arguments[0] -ne '/getactivescheme'){throw 'Already effective setting must not be rewritten'}
     [pscustomobject]@{Code=0;Output=$guid}
@@ -359,6 +461,8 @@ $null=Invoke-Operation ('Registry reg add "'+$path+'" /v '+$name+' /t '+$type+' 
 
     def test_portable_power_mode_applies_verifies_and_reports_noop_failure(self):
         rows, _ = self.run_case(r'''
+function Test-ManagedCoreParking {$false}
+function Get-ActivePowerScheme { (Invoke-NativeOperation powercfg @('/getactivescheme')).Output }
 function Get-PowerCapabilities {@{ModernStandby=$true;Portable=$true}}
 $script:acMode=[guid]::Empty; $script:apply=$true
 function Get-ACPowerMode {$script:acMode}

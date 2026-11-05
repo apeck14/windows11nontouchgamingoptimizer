@@ -61,6 +61,12 @@ set "ADMIN_STATUS=%errorlevel%"
 if "%ADMIN_STATUS%"=="2" exit /b 0
 if not "%ADMIN_STATUS%"=="0" exit /b %ADMIN_STATUS%
 
+"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -File "%OPERATIONS_SCRIPT%" -Mode CheckUser
+if errorlevel 1 (
+    pause
+    exit /b 1
+)
+
 for /f %%I in ('%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "STAMP=%%I"
 set "LOG_DIR=%SCRIPT_DIR%logs"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>&1
@@ -178,7 +184,7 @@ echo [*] Step 10/13: Finalizing memory optimizations...
 call :OptimizeMemory
 echo [*] Step 11/13: Optimizing page file...
 call :OptimizePageFile
-echo [*] Step 12/13: Disabling CPU core parking...
+echo [*] Step 12/13: Configuring CPU core parking...
 call :DisableCoreParking
 echo [*] Step 13/13: Tuning storage-specific settings...
 call :OptimizeStorageByType
@@ -563,16 +569,9 @@ call :RunOperation Pagefile Auto
 exit /b %errorlevel%
 
 :DisableCoreParking
-call :Log "Disabling CPU core parking"
-if not defined OPTIMIZER_FULL_RUN echo [*] Disabling CPU core parking for better gaming performance...
-REM Extract the actual GUID from powercfg output (format: "Power Scheme GUID: 12345678-1234-...")
-for /f "tokens=4" %%G in ('powercfg /getactivescheme 2^>nul ^| findstr "GUID"') do set "SCHEME_GUID=%%G"
-if not defined SCHEME_GUID (
-    call :Log "Warning: Could not get active power scheme GUID, using default"
-    set "SCHEME_GUID=SCHEME_CURRENT"
-)
-call :RunOperation Native powercfg -setacvalueindex %SCHEME_GUID% SUB_PROCESSOR CPMINCORES 100
-call :RunOperation Native powercfg -setactive %SCHEME_GUID%
+call :Log "Configuring CPU core parking"
+if not defined OPTIMIZER_FULL_RUN echo [*] Configuring CPU core parking for this processor...
+call :RunOperation Parking Configure
 call :Log "Core parking change attempted; see results"
 exit /b 0
 
@@ -771,9 +770,7 @@ set "OS_MAJOR=10"
 for /f "tokens=4 delims=[] " %%I in ('ver') do (
     for /f "tokens=1 delims=." %%J in ("%%I") do set "OS_MAJOR=%%J"
 )
-for /f "tokens=2 delims=:" %%I in ('systeminfo ^| findstr /B /C:"OS Name"') do (
-    for /f "tokens=* delims= " %%J in ("%%I") do set "OS_CAPTION=%%J"
-)
+for /f "usebackq delims=" %%I in (`"%POWERSHELL%" -NoProfile -Command "(Get-CimInstance Win32_OperatingSystem).Caption"`) do set "OS_CAPTION=%%I"
 call :Log "Detected OS: %OS_CAPTION% (major %OS_MAJOR%)"
 if %OS_MAJOR% GEQ 10 (
     echo Detected: %OS_CAPTION% - Compatible
@@ -996,8 +993,7 @@ exit /b 0
 
 :DetectStorageType
 set "STORAGE_TYPE=Unknown"
-REM PowerShell for storage detection
-for /f "usebackq delims=" %%I in (`%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$d = Get-PhysicalDisk | Where-Object { $_.DeviceID -eq '0' }; if ($d) { $d.MediaType } else { 'Unknown' }"`) do (
+for /f "usebackq delims=" %%I in (`"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -File "%OPERATIONS_SCRIPT%" -Mode StorageType 2^>nul`) do (
     if "%%I"=="SSD" set "STORAGE_TYPE=SSD"
     if "%%I"=="HDD" set "STORAGE_TYPE=HDD"
 )
@@ -1104,18 +1100,12 @@ if not errorlevel 1 (
 )
 
 echo   %CLR_SUBTITLE%Core Parking:%CLR_RESET%
-set "COREPARK_OK=0"
-set "COREPARK_LINE="
-for /f "tokens=*" %%L in ('powercfg -query SCHEME_CURRENT SUB_PROCESSOR CPMINCORES 2^>nul ^| findstr /I "Current AC Power Setting Index"') do (
-    set "COREPARK_LINE=%%L"
-    echo %%L | findstr /I "0x00000064" >nul && set "COREPARK_OK=1"
-)
-if "%COREPARK_OK%"=="1" (
-    echo     %CLR_SUCCESS%[PASS]%CLR_RESET% CPU core parking disabled (CPMINCORES=100)
+"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command ". $env:OPERATIONS_SCRIPT -NoRun; if (Test-ManagedCoreParking) { if ((Get-ActivePowerScheme) -eq [guid]'381b4222-f694-41f0-9685-ff5bb260df2e') { exit 0 }; exit 1 }; if ((Get-ACPowerValue (Get-ActivePowerScheme) '54533251-82be-4824-96c1-47b60b740d00' '0cc5b647-c1df-4637-891a-dec35c318583') -eq 100) { exit 0 }; exit 1" >nul 2>&1
+if not errorlevel 1 (
+    echo     %CLR_SUCCESS%[PASS]%CLR_RESET% Core parking matches this processor's policy
     set /a VERIFY_PASS+=1
 ) else (
-    echo     %CLR_WARNING%[WARN]%CLR_RESET% Core parking may still be active
-    if defined COREPARK_LINE echo     Current: %COREPARK_LINE%
+    echo     %CLR_WARNING%[WARN]%CLR_RESET% Core parking needs review
     set /a VERIFY_FAIL+=1
 )
 

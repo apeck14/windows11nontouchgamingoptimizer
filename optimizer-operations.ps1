@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Operation', 'Summary', 'Initialize')][string]$Mode = 'Operation',
+    [ValidateSet('Operation', 'Summary', 'Initialize', 'CheckUser', 'StorageType')][string]$Mode = 'Operation',
     [switch]$NoRun
 )
 
@@ -7,6 +7,53 @@ param(
 # No expression evaluation: command arguments are tokenized and passed to a
 # small allowlist of native programs. Every result states its verification level.
 $ErrorActionPreference = 'Stop'
+
+function Get-CurrentUserSid { [Security.Principal.WindowsIdentity]::GetCurrent().User.Value }
+
+function Get-DesktopUserSids {
+    $session = (Get-Process -Id $PID).SessionId
+    Get-CimInstance Win32_Process -Filter "Name='explorer.exe' AND SessionId=$session" -ErrorAction Stop | ForEach-Object {
+        $owner = Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction Stop
+        if ($owner.ReturnValue -ne 0) { throw 'Could not identify the desktop user.' }
+        $owner.Sid
+    } | Sort-Object -Unique
+}
+
+function Assert-UserContext {
+    $users = @(Get-DesktopUserSids)
+    if ($users.Count -ne 1 -or $users[0] -ne (Get-CurrentUserSid)) {
+        throw 'Run the optimizer from the gaming user desktop using that same account for administrator approval. No changes applied.'
+    }
+}
+
+function Get-SystemStorageType {
+    $disks = @(Get-Partition -DriveLetter $env:SystemDrive.TrimEnd(':') -ErrorAction Stop | Get-Disk -ErrorAction Stop)
+    if ($disks.Count -ne 1) { return 'Unknown' }
+    $disk = $disks[0]
+    $matches = @(Get-PhysicalDisk -ErrorAction Stop | Where-Object {
+        ($disk.UniqueId -and $disk.UniqueId.Trim() -and $_.UniqueId -and $disk.UniqueId.Trim() -eq $_.UniqueId.Trim()) -or
+        ($disk.SerialNumber -and $disk.SerialNumber.Trim() -and $_.SerialNumber -and $disk.SerialNumber.Trim() -eq $_.SerialNumber.Trim())
+    })
+    if ($matches.Count -eq 1 -and [string]$matches[0].MediaType -in @('SSD','HDD')) { return [string]$matches[0].MediaType }
+    return 'Unknown'
+}
+
+function Test-ManagedCoreParking {
+    $cpu = @(Get-CimInstance Win32_Processor -ErrorAction Stop)
+    if (-not $cpu.Count -or -not $cpu[0].Name) { throw 'Could not identify the processor; power tuning skipped.' }
+    return [bool]@($cpu | Where-Object { $_.Name -match '\bRyzen\s+9\s+(?:79(?:00|50)X3D|99(?:00|50)X(?:3D)?|7945HX3D|9955HX3D)\b' }).Count
+}
+
+function Set-GamingCoreParking {
+    if (Test-ManagedCoreParking) {
+        Write-OperationResult AlreadyConfigured 'CPU core parking' 'Preserved for AMD driver-managed gaming scheduling.' $true
+        return
+    }
+    $scheme = Get-ActivePowerScheme
+    Invoke-GenericChange @('powercfg','-setacvalueindex',[string]$scheme,'SUB_PROCESSOR','CPMINCORES','100')
+    $result = Invoke-NativeOperation powercfg @('-setactive',[string]$scheme)
+    if ($result.Code -ne 0) { throw ('Could not activate core-parking settings: '+$result.Output) }
+}
 
 function Write-OperationResult {
     param([string]$Status, [string]$Operation, [string]$Detail, [bool]$Verified = $false, [long]$Bytes = 0, [bool]$Duplicate = $false)
@@ -227,6 +274,10 @@ public static class OptimizerPower {
     [return: MarshalAs(UnmanagedType.U1)]
     static extern bool GetPwrCapabilities(out Capabilities capabilities);
     [DllImport("powrprof.dll")]
+    static extern uint PowerGetActiveScheme(IntPtr root, out IntPtr scheme);
+    [DllImport("kernel32.dll")]
+    static extern IntPtr LocalFree(IntPtr memory);
+    [DllImport("powrprof.dll")]
     static extern uint PowerGetUserConfiguredACPowerMode(out Guid mode);
     [DllImport("powrprof.dll")]
     static extern uint PowerSetUserConfiguredACPowerMode(ref Guid mode);
@@ -236,6 +287,12 @@ public static class OptimizerPower {
         Capabilities value;
         if (!GetPwrCapabilities(out value)) throw new Win32Exception(Marshal.GetLastWin32Error());
         return value;
+    }
+    public static Guid ReadActiveScheme() {
+        IntPtr value; uint code=PowerGetActiveScheme(IntPtr.Zero, out value);
+        if(code!=0) throw new Win32Exception((int)code);
+        try { return (Guid)Marshal.PtrToStructure(value, typeof(Guid)); }
+        finally { LocalFree(value); }
     }
     public static Guid ReadACMode() {
         Guid value; uint code=PowerGetUserConfiguredACPowerMode(out value);
@@ -261,6 +318,7 @@ function Get-PowerCapabilities {
     @{ModernStandby=($caps.AoAc -ne 0); Portable=($caps.Lid -ne 0 -or ($caps.Batteries -ne 0 -and $caps.ShortTermBatteries -eq 0))}
 }
 
+function Get-ActivePowerScheme { Initialize-PowerApi; [OptimizerPower]::ReadActiveScheme() }
 function Get-ACPowerMode { Initialize-PowerApi; [OptimizerPower]::ReadACMode() }
 function Set-ACPowerMode([guid]$Mode) { Initialize-PowerApi; [OptimizerPower]::SetACMode($Mode) }
 function Get-ACPowerValue([guid]$Scheme,[guid]$Group,[guid]$Setting) { Initialize-PowerApi; [OptimizerPower]::ReadACValue($Scheme,$Group,$Setting) }
@@ -283,8 +341,10 @@ function Get-PerformancePlans {
 }
 
 function Invoke-PerformancePlan {
+    $managed = Test-ManagedCoreParking
+    if ($managed) { Invoke-GenericChange @('powercfg','-setactive','381b4222-f694-41f0-9685-ff5bb260df2e') }
     $caps = Get-PowerCapabilities
-    if ($caps.ModernStandby -or $caps.Portable) {
+    if ($managed -or $caps.ModernStandby -or $caps.Portable) {
         $wanted = [guid]'ded574b5-45a0-4f42-8737-46345c09c238'
         $status = 'AlreadyConfigured'
         if ((Get-ACPowerMode) -ne $wanted) { Set-ACPowerMode $wanted; $status = 'Applied' }
@@ -508,9 +568,7 @@ function Get-NativeDesiredState {
     if ($exe -eq 'powercfg' -and $Tokens[1] -eq '-setacvalueindex') {
         $scheme = $Tokens[2]
         if ($scheme -eq 'SCHEME_CURRENT') {
-            $query = Invoke-NativeOperation powercfg @('/getactivescheme')
-            if ($query.Code -ne 0 -or $query.Output -notmatch '[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}') { return $null }
-            $scheme = $Matches[0]
+            $scheme = Get-ActivePowerScheme
         }
         $aliases = @{SUB_PROCESSOR='54533251-82be-4824-96c1-47b60b740d00';CPMINCORES='0cc5b647-c1df-4637-891a-dec35c318583'}
         $group = $Tokens[3]; $setting = $Tokens[4]
@@ -523,9 +581,9 @@ function Get-NativeDesiredState {
         if ($query.Code -eq 0 -and $query.Output -match '=\s*(\d+)') { return ($Matches[1] -eq $Tokens[4]) }
     }
     if ($exe -eq 'powercfg' -and $Tokens[1] -eq '-setactive') {
-        $query = Invoke-NativeOperation powercfg @('/getactivescheme')
+        $active = Get-ActivePowerScheme
         $desired = if ($Tokens[2] -eq 'SCHEME_MIN') {'8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c'} else {$Tokens[2]}
-        if ($desired -match '^[a-f\d-]{36}$' -and $query.Code -eq 0) { return $query.Output -match [regex]::Escape($desired) }
+        if ($desired -match '^[a-f\d-]{36}$') { return $active -eq [guid]$desired }
     }
     if ($exe -eq 'bcdedit' -and $Tokens[1] -eq '/deletevalue') {
         $query = Invoke-NativeOperation bcdedit @('/enum','{current}')
@@ -622,6 +680,7 @@ function Invoke-Operation {
             Memory { Invoke-MemoryChange $tokens[1] ($tokens[2] -eq '1') }
             Pagefile { Invoke-PagefileChange $tokens[1] }
             Plan { Invoke-PerformancePlan }
+            Parking { Set-GamingCoreParking }
             Delivery { Set-DeliveryOptimization }
             Restore { New-OptimizerRestorePoint }
             Windowed { Enable-WindowedOptimizations }
@@ -644,6 +703,8 @@ try {
         }
         exit 0
     }
+    if ($Mode -eq 'CheckUser') { Assert-UserContext; exit 0 }
+    if ($Mode -eq 'StorageType') { Get-SystemStorageType; exit 0 }
     if ($Mode -eq 'Summary') { exit (Show-OperationSummary) }
     exit (Invoke-Operation $env:OPTIMIZER_OPERATION)
 } catch {
