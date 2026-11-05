@@ -323,7 +323,8 @@ if($script:recycles -ne 1){throw 'Changed file was recycled'}
 . (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
 $script:inventoryShown=$false
 function Get-CleanupCandidates {param($Scope) [pscustomobject]@{Path='example.zip';Modified=(Get-Date);Bytes=7}}
-function Show-AppInventory {$script:inventoryShown=$true}
+function Show-AppInventory {param([switch]$Largest) $script:inventoryShown=$true}
+function Get-DuplicateDownloads {}
 function Show-StorageSummary {}
 function Out-GridView {param($Title,[switch]$PassThru)}
 function Move-CleanupFileToRecycleBin {throw 'Cancellation must not recycle'}
@@ -391,6 +392,59 @@ Show-StorageSummary
 ''')
         for expected in ['Free GB', 'Used GB', 'Pictures', 'Apps', 'Partial', 'C:\\Pictures', 'not additive']:
             self.assertIn(expected, output)
+
+    def test_duplicate_downloads_keep_one_copy_and_skip_nested_and_different_content(self):
+        self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$root=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'downloads'
+$nested=Join-Path $root 'portable'
+$null=New-Item -ItemType Directory $nested -Force
+foreach($name in @('original.zip','copy.zip','different.zip')){[IO.File]::WriteAllText((Join-Path $root $name), $(if($name -eq 'different.zip'){'xyz'}else{'abc'}))}
+(Get-Item (Join-Path $root 'original.zip')).CreationTimeUtc=(Get-Date).AddDays(-1)
+[IO.File]::WriteAllText((Join-Path $nested 'nested.zip'),'abc')
+function Get-DownloadsFolder {$root}
+$dupes=@(Get-DuplicateDownloads)
+if($dupes.Count -ne 1 -or $dupes[0].Path -ne (Join-Path $root 'copy.zip') -or $dupes[0].KeepPath -ne (Join-Path $root 'original.zip')){throw 'Incorrect duplicate selection'}
+$script:moved=0
+function Move-CleanupFileToRecycleBin {param($Path)
+    $script:moved++
+    if($Path -ne (Join-Path $root 'copy.zip')){throw 'Wrong file'}
+    $write=$null
+    try {$write=[IO.File]::Open((Join-Path $root 'original.zip'),'Open','Write','ReadWrite')} catch {}
+    if($write){$write.Dispose(); throw 'Retained copy was not locked against changes'}
+}
+if(-not (Invoke-RecycleFiles $dupes) -or $script:moved -ne 1){throw 'Duplicate not processed'}
+[IO.File]::WriteAllText((Join-Path $root 'original.zip'),'xyz')
+if((Invoke-RecycleFiles $dupes) -or $script:moved -ne 1){throw 'Changed retained copy was not protected'}
+''')
+
+    def test_report_archive_exception_does_not_allow_report_queue(self):
+        self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$env:ProgramData=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'programdata'
+$archive=Join-Path $env:ProgramData 'Microsoft\Windows\WER\ReportArchive'
+$queue=Join-Path $env:ProgramData 'Microsoft\Windows\WER\ReportQueue'
+$null=New-Item -ItemType Directory $archive,$queue -Force
+if(-not (Test-CleanupPath $archive)){throw 'Archive should be eligible'}
+if(Test-CleanupPath $queue){throw 'Pending queue must remain protected'}
+$roots=@(Get-CleanupRoots Deep | Where-Object Category -eq 'Archived crash report - review')
+if(-not ($roots.Path -contains $archive) -or @($roots | Where-Object Days -ne 30).Count){throw 'Incorrect archive rules'}
+''')
+
+    def test_largest_app_folders_match_installed_names_and_show_gb(self):
+        _, output = self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$root=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'apps'
+$fixtureInstallPath=Join-Path $root 'Example'
+$null=New-Item -ItemType Directory $fixtureInstallPath -Force
+function Get-AppInventory {[pscustomobject]@{App='Example Game';Path=$fixtureInstallPath}}
+function Get-StorageRoots {[pscustomobject]@{Category='Apps';Path=$root}}
+function Measure-StorageRoots {param($Roots) [pscustomobject]@{Category='Example';Path=$fixtureInstallPath;Bytes=3GB;Partial=$false}}
+Show-AppInventory -Largest
+''')
+        self.assertIn('Example Game', output)
+        self.assertIn('GB', output)
+        self.assertIn('LARGEST APPLICATION FOLDERS', output)
 
     def test_recycle_api_compiles_without_touching_files(self):
         self.run_case(r'''

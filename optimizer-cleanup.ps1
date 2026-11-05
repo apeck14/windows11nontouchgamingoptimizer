@@ -133,6 +133,9 @@ function Get-CleanupRoots([string]$Scope) {
             [pscustomobject]@{Path=$downloads; Category='Old download - review'; Days=90; Extensions=@('.exe','.msi','.msix','.zip','.7z','.rar','.iso')}
         }
         [pscustomobject]@{Path=(Join-Path $env:LOCALAPPDATA 'CrashDumps'); Category='Old crash dump'; Days=30; Extensions=@('.dmp')}
+        foreach ($path in @($env:LOCALAPPDATA,$env:ProgramData)) {
+            [pscustomobject]@{Path=(Join-Path $path 'Microsoft\Windows\WER\ReportArchive'); Category='Archived crash report - review'; Days=30; Extensions=$null}
+        }
         $videos = [Environment]::GetFolderPath('MyVideos')
         if ($videos) {
             [pscustomobject]@{Path=(Join-Path $videos 'Captures'); Category='Old recording - review'; Days=90; Extensions=@('.mp4','.mkv','.wmv')}
@@ -145,7 +148,11 @@ function Test-CleanupPath([string]$Path) {
     $full = [IO.Path]::GetFullPath($Path)
     $drive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($full))
     if ($drive.DriveType -ne 'Fixed' -or $drive.DriveFormat -ne 'NTFS') { return $false }
-    foreach ($protected in @($env:SystemRoot,$env:ProgramFiles,${env:ProgramFiles(x86)},$env:ProgramData,$env:OneDrive,$env:OneDriveConsumer,$env:OneDriveCommercial)) {
+    $archive = Join-Path $env:ProgramData 'Microsoft\Windows\WER\ReportArchive'
+    $inArchive = $full.StartsWith($archive+'\',[StringComparison]::OrdinalIgnoreCase) -or $full.TrimEnd('\') -ieq $archive
+    $protectedPaths = @($env:SystemRoot,$env:ProgramFiles,${env:ProgramFiles(x86)},$env:OneDrive,$env:OneDriveConsumer,$env:OneDriveCommercial)
+    if (-not $inArchive) { $protectedPaths += $env:ProgramData }
+    foreach ($protected in $protectedPaths) {
         if ($protected -and ($full.TrimEnd('\') -ieq $protected.TrimEnd('\') -or $full.StartsWith($protected.TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase))) { return $false }
     }
     $item = Get-Item -LiteralPath $full -Force -ErrorAction Stop
@@ -176,15 +183,66 @@ function Get-CleanupCandidates([string]$Scope) {
     }
 }
 
-function Show-AppInventory {
+function Get-CleanupHash([string]$Path) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $stream = $null
+    try {
+        $stream = [IO.File]::OpenRead($Path)
+        [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','')
+    } finally { if ($stream) { $stream.Dispose() }; $sha.Dispose() }
+}
+
+function Get-DuplicateDownloads {
+    $downloads = Get-DownloadsFolder
+    if (-not $downloads -or -not (Test-Path -LiteralPath $downloads -PathType Container) -or -not (Test-CleanupPath $downloads)) { return }
+    # Only loose downloads: never deduplicate inside extracted/portable applications.
+    $files = @(Get-ChildItem -LiteralPath $downloads -File -ErrorAction Stop | Where-Object {
+        $_.Length -gt 0 -and $_.Extension -in @('.exe','.msi','.msix','.zip','.7z','.rar','.iso') -and (Test-CleanupPath $_.FullName)
+    })
+    foreach ($size in @($files | Group-Object Length | Where-Object Count -gt 1)) {
+        $hashed = @(foreach ($file in $size.Group) {
+            try {
+                [pscustomobject]@{File=$file;Hash=(Get-CleanupHash $file.FullName)}
+            } catch { Write-Warning "Could not compare $($file.FullName): $_" }
+        })
+        foreach ($group in @($hashed | Group-Object Hash | Where-Object Count -gt 1)) {
+            $copies = @($group.Group | Sort-Object {$_.File.CreationTimeUtc},{$_.File.Name})
+            $keeper = $copies[0].File.FullName
+            foreach ($copy in $copies | Select-Object -Skip 1) {
+                [pscustomobject]@{Path=$copy.File.FullName;Bytes=$copy.File.Length;Modified=$copy.File.LastWriteTime;KeepPath=$keeper;Hash=$copy.Hash}
+            }
+        }
+    }
+}
+
+function Get-AppInventory {
     $paths = @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
         'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
         'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')
     $apps = @(Get-ItemProperty $paths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -and -not $_.SystemComponent } |
-        Select-Object @{n='App';e={$_.DisplayName}},Publisher,@{n='EstimatedGB';e={if ($null -ne $_.EstimatedSize) {[math]::Round($_.EstimatedSize/1MB,2)}}})
-    $apps += @(Get-AppxPackage -ErrorAction Stop | Select-Object @{n='App';e={$_.Name}},Publisher,@{n='EstimatedGB';e={$null}})
+        Select-Object @{n='App';e={$_.DisplayName}},Publisher,@{n='EstimatedGB';e={if ($null -ne $_.EstimatedSize) {[math]::Round($_.EstimatedSize/1MB,2)}}},@{n='Path';e={$_.InstallLocation}})
+    $apps += @(Get-AppxPackage -ErrorAction Stop | Select-Object @{n='App';e={$_.Name}},Publisher,@{n='EstimatedGB';e={$null}},@{n='Path';e={$_.InstallLocation}})
+    $apps | Sort-Object App,Path -Unique
+}
+
+function Show-AppInventory([switch]$Largest) {
+    $apps = @(Get-AppInventory)
     Write-Host 'Installed apps are listed for review only; installed applications cannot be recycled safely.'
-    $apps | Sort-Object App -Unique | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
+    if (-not $Largest) {
+        $apps | Select-Object App,Publisher,EstimatedGB | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
+        return
+    }
+    $roots = @(foreach ($base in @(Get-StorageRoots | Where-Object Category -eq 'Apps')) {
+        foreach ($folder in @(Get-ChildItem -LiteralPath $base.Path -Directory -ErrorAction SilentlyContinue)) {
+            [pscustomobject]@{Category=$folder.Name;Path=$folder.FullName}
+        }
+    })
+    Write-Host "`nLARGEST APPLICATION FOLDERS - measured estimates; shared folders may contain several apps"
+    Measure-StorageRoots $roots | Sort-Object Bytes -Descending | Select-Object -First 15 | ForEach-Object {
+        $folder = $_
+        $names = @($apps | Where-Object { $_.Path -and ($_.Path.TrimEnd('\') -ieq $folder.Path -or $_.Path.StartsWith($folder.Path+'\',[StringComparison]::OrdinalIgnoreCase)) } | Select-Object -ExpandProperty App -Unique)
+        [pscustomobject]@{Folder=$folder.Category;GB=[math]::Round($folder.Bytes/1GB,2);Apps=($names -join '; ');Partial=$folder.Partial;Path=$folder.Path}
+    } | Format-Table -AutoSize -Wrap | Out-String -Width 200 | Write-Host
 }
 
 function Move-CleanupFileToRecycleBin([string]$Path) {
@@ -203,24 +261,44 @@ function Invoke-RecycleCleanup([string]$Scope) {
     if ($Scope -notin @('Safe','Deep')) { throw 'Unknown cleanup scope.' }
     Write-Host 'Files go to the Recycle Bin only. Space is not reclaimed until you empty it manually.'
     Write-Host 'Windows Storage Sense or other cleanup software may empty the bin independently.'
-    $files = @(Get-CleanupCandidates $Scope | Sort-Object Path -Unique)
+    $success = $true
     if ($Scope -eq 'Deep') {
         Show-StorageSummary
-        Show-AppInventory
+        Show-AppInventory -Largest
+        Write-Host 'Automatically recycling identical loose installer/archive downloads; the oldest-created copy is kept.'
+        $success = Invoke-RecycleFiles @(Get-DuplicateDownloads)
+    }
+    $files = @(Get-CleanupCandidates $Scope | Sort-Object Path -Unique)
+    if ($Scope -eq 'Deep') {
         if ($files.Count) { $files = @($files | Out-GridView -Title 'Select files to recycle, then click OK. Nothing is preselected.' -PassThru) }
     }
-    if (-not $files.Count) { Write-OperationResult AlreadyConfigured 'Recycle cleanup' 'No eligible files selected.'; return }
+    if (-not $files.Count) { Write-OperationResult AlreadyConfigured 'Recycle cleanup' 'No other eligible files selected.' }
+    elseif (-not (Invoke-RecycleFiles $files)) { $success=$false }
+    if (-not $success) { throw 'Some files could not be recycled. No permanent-delete fallback was attempted.' }
+}
+
+function Invoke-RecycleFiles($Files) {
     $failed = $false
-    foreach ($file in $files) {
+    foreach ($file in $Files) {
+        $keeper = $null
         try {
             $current = Get-Item -LiteralPath $file.Path -Force -ErrorAction Stop
             if ($current.Length -ne $file.Bytes -or $current.LastWriteTime -ne $file.Modified) { throw 'File changed after scanning; skipped.' }
+            if ($file.KeepPath) {
+                if ($file.Path -ieq $file.KeepPath -or -not (Test-CleanupPath $file.KeepPath)) { throw 'Retained copy is unavailable; skipped.' }
+                # Hold the survivor against writes/deletion throughout recycling its duplicate.
+                $keeper = [IO.File]::Open($file.KeepPath,'Open','Read','Read')
+                if ((Get-CleanupHash $file.KeepPath) -ne $file.Hash -or
+                    (Get-CleanupHash $file.Path) -ne $file.Hash) { throw 'Duplicate content changed; skipped.' }
+            }
             Move-CleanupFileToRecycleBin $file.Path
-            Write-OperationResult Applied ('Recycle '+$file.Path) 'Shell recycling completed; original path is absent.' $true
+            $detail = 'Shell recycling completed; original path is absent.'
+            if ($file.KeepPath) { $detail += ' Retained identical copy: '+$file.KeepPath }
+            Write-OperationResult Applied ('Recycle '+$file.Path) $detail $true
         } catch {
             $failed = $true
             Write-OperationResult Failed ('Recycle '+$file.Path) $_.Exception.Message
-        }
+        } finally { if ($keeper) { $keeper.Dispose() } }
     }
-    if ($failed) { throw 'Some files could not be recycled. No permanent-delete fallback was attempted.' }
+    return -not $failed
 }
