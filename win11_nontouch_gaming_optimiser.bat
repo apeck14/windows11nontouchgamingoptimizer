@@ -512,7 +512,8 @@ exit /b 0
 :ShowHelp
 echo Full optimization includes gaming, network, visual, startup, and quick cleanup changes.
 echo Quick cleanup recycles old temporary files. Deep cleanup reviews storage and more files.
-echo Full creates a restore point first. Recovery contains restore and partial undo options.
+echo MW4 / Warzone is a separate preset. Close the game first; undo it through Recovery.
+echo Full attempts a restore point first. Recovery contains restore and partial undo options.
 echo Full disables memory integrity; re-enable it in Recovery if needed.
 echo Apps stay installed. Recycled files occupy space until you empty the Recycle Bin.
 echo Results show failures and restart requirements. Partial undo is not a full restore.

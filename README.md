@@ -1,48 +1,39 @@
 # Windows 11 Gaming Optimizer
 
-Windows configuration and recycle-only cleanup. [MIT license](LICENSE).
+Windows gaming tweaks and recycle-only cleanup. [MIT license](LICENSE).
 
-## Run
+## Run and recover
 
-Extract the complete repository ZIP and run `win11_nontouch_gaming_optimiser.bat` as administrator. Keep its `.ps1` and `.cs` files together. Use the same Windows account for the desktop and administrator approval; the script stops if they differ. Close running optimizer windows before editing or updating its files.
+Extract the complete ZIP; run `win11_nontouch_gaming_optimiser.bat` as administrator using the desktop user's account. Keep all `.ps1` and `.cs` files together.
 
-- Full optimization defaults to **memory integrity (HVCI) off**, reducing security and potentially affecting anti-cheat compatibility. **Recovery â†’ Memory integrity** re-enables it. Game DVR recording defaults off; answer No to preserve capture settings. Installed apps remain installed. Performance gains are not guaranteed. Ryzen 9 CPUs that need driver-managed core parking use Balanced with AC Best performance. Other desktop runs reuse one Ultimate Performance/Gaming Optimizer plan and delete extra plans with those names; custom-named plans are preserved.
-- Full optimization attempts to enable System Protection and verify a new restore point. Failure defaults to cancelling. **Recovery** also creates checkpoints and opens System Restore. Cleanup does not create checkpoints. Restore points can expire; **Undo** is partial, not a substitute for a backup.
-- **2** recycles user temp files older than 30 days. **3** shows storage/app-folder estimates in GB and **automatically recycles duplicate loose downloads**, keeping one copy after comparing extensions and all data streams. Other cleanup candidates require selection.
-- Files go only to the Recycle Bin; space is not freed until it is emptied. Storage Sense or other software can empty it independently. System/update caches and pending crash reports are excluded.
-- Each action ends with a short summary. **P** summarizes the session. Detailed results and selected registry backups are in `logs/`; check failures and restart notices before rerunning.
+- **1 Full optimization:** Windows tweaks plus quick cleanup. Defaults to memory integrity (HVCI) off and Game DVR recording off; the latter has an opt-out prompt. Disabling HVCI reduces security and can affect anti-cheat compatibility. Recovery can re-enable it.
+- **2 Quick cleanup:** recycle user temp files older than 30 days.
+- **3 Deep cleanup:** storage estimates in GB; automatically recycle identical loose installer/archive downloads, retaining one copy. Other candidates require selection. Installed apps remain installed. Requires `Out-GridView`.
+- **4 MW4 / Warzone:** separate competitive preset for existing compatible game keys and NVIDIA application profiles. Shared configs/profiles may affect other Call of Duty titles. Prioritizes latency and lower effects costs; preserves textures, upscaling, FOV and controls. Tearing and higher GPU power use are possible.
 
-## MW4 / Warzone
+Full optimization attempts a verified restore point; failure defaults to cancellation. **R Recovery** opens System Restore, creates checkpoints and provides partial undo. Restore points can expire; partial undo is not a full backup. Standalone cleanup creates no checkpoint. Recycled files occupy space until the bin is emptied; Storage Sense can empty it independently.
 
-**4** applies the competitive preset with the game closed. It finds retail shared Call of Duty configs in LocalAppData/Activision and Documents, including paired `.txt0`/`.txt1` files. Only existing compatible keys change, without a game-version gate. Unknown keys or incompatible values are preserved. Shared configs/profiles can affect other installed Call of Duty titles.
+**Recovery > 5** restores the latest game backup from `logs/mw4-backups/`, preserving subsequent edits. Game apply/restore requires the game closed. No-op runs keep the previous backup.
 
-The preset enables NVIDIA Reflex Boost; disables gameplay V-Sync, frame caps, frame generation, ray tracing and blur/depth-of-field; and lowers shadow/terrain costs. Additional defaults reduce shader, particle, physics, reflection, weather and water effects. Volumetrics cap at Medium, tessellation at Near; lower existing quality is retained. GPU upload heaps are enabled through the game's hardware support checks, without forcing driver/BIOS ReBAR. Textures, upscaling, model detail, FOV and controls are preserved. NVIDIA application profiles use V-Sync off, no driver frame cap, highest available refresh rate and Prefer maximum performance. Tearing and greater GPU power draw are possible; missing profiles/settings are skipped. Global driver settings stay unchanged.
+Each action shows results; **P** summarizes the session. Diagnostics and selected registry backups live in `logs/`. Read-back verifies settings, not FPS gains; benchmark in-game.
 
-Backups go to `logs/mw4-backups/`. **Recovery > 5** restores the latest backup, refusing to overwrite subsequent edits. No-op runs keep that backup. File/driver read-back verifies saved values, not FPS or whether the game later rewrites them. Compare the in-game benchmark before/after; keep native or Quality upscaling if lower modes obscure distant targets.
+## Editing
 
-Rationale: [NVIDIA latency guidance](https://www.nvidia.com/en-us/geforce/guides/system-latency-optimization-guide/), [MW4 setting benchmarks](https://www.pcgamer.com/games/call-of-duty/ive-tested-every-graphics-setting-in-call-of-duty-modern-warfare-4-tweak-these-four-options-for-the-best-performance/) and [public NVAPI DRS](https://docs.nvidia.com/nvapi/group__drsapi.html). Config keys/ranges are checked against game-generated files. Avoid guessed worker counts, VRAM budgets, hidden driver flags and shader-cache deletion.
+Close running optimizer windows before editing or updating files. Target Windows PowerShell **5.1** and preserve **CRLF**, especially in the batch file. Dot-source `optimizer-operations.ps1 -NoRun` to load functions without running an operation.
 
-Additional effects defaults draw on [first-hand community testing](https://www.reddit.com/r/modernwarfare4/comments/1x913ml/noticed_fps_doesnt_really_change_much_regardless/); benefits vary by scene/hardware. [NVIDIA documents the power-mode benefit](https://nvidia.custhelp.com/app/answers/detail/a_id/3130) for incorrect downclocking and [GPU-upload support requirements](https://developer.nvidia.com/blog/optimizing-dx12-resource-uploads-to-the-gpu-using-gpu-upload-heaps/).
-
-## Source map
-
-- `win11_nontouch_gaming_optimiser.bat`: menus, elevation, presets and tweak commands.
-- `optimizer-operations.ps1`: verified operations, restore points, result journal and summaries. Dot-source with `-NoRun` for tests.
-- `optimizer-cleanup.ps1`: storage estimates, candidate selection, duplicate checks and Shell recycling.
-- `optimizer-mw4.ps1`, `optimizer-nvidia.cs`: game preset, backups/restore, public NVIDIA driver API.
+| Source | Responsibility | Tests |
+| --- | --- | --- |
+| `win11_nontouch_gaming_optimiser.bat` | Menus, elevation, Windows presets | `tests/test_regressions.py` |
+| `optimizer-operations.ps1` | Verified operations, restore points, reporting | `tests/test_operation_results.py` |
+| `optimizer-cleanup.ps1` | Storage, duplicate detection, recycling | `tests/test_operation_results.py` |
+| `optimizer-mw4.ps1`, `optimizer-nvidia.cs` | Game preset, backup/restore, NVIDIA API | `tests/test_mw4.py` |
 
 ## Tests
 
-Windows, Windows PowerShell 5.1, and Python 3.9+; no Python dependencies. Deeper cleanup also requires `Out-GridView`.
+Windows, Windows PowerShell 5.1, Python 3.9+; no Python dependencies. Run from the repository root:
 
 ```powershell
 python -m unittest discover -s tests -p "test_*.py" -q
 ```
 
-System mutations are mocked; file tests use disposable fixtures. To include the real Recycle Bin round-trip test (generated files only):
-
-```powershell
-$env:OPTIMIZER_TEST_RECYCLE = '1'
-python -m unittest discover -s tests -p "test_*.py" -q
-Remove-Item Env:OPTIMIZER_TEST_RECYCLE
-```
+System/driver mutations are mocked; file tests use disposable fixtures. To also test actual recycling and restoration of generated files, set `$env:OPTIMIZER_TEST_RECYCLE = '1'` before running; unset it afterward with `Remove-Item Env:OPTIMIZER_TEST_RECYCLE`.
