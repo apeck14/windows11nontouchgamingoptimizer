@@ -108,6 +108,63 @@ if((Convert-Mw4Config $result.Text $true).Text -cne $result.Text){throw 'Not ide
 if((Convert-Mw4Config $text $false).Text -notmatch 'NvidiaReflex@0;12;99 = Enabled //'){throw 'Changed NVIDIA preference on AMD'}
 ''')
 
+    def test_warzone_paired_configs_disable_both_depth_of_field_formats_and_restore(self):
+        rows = self.run_case(r'''
+$text=@'
+DepthOfField@0;57752;20945 = true
+DepthOfField@1;29449;43096 = On // one of Off, On, Script
+DepthOfField@2;1;1 = 2 // 0 to 3
+DepthOfFieldQuality@0;11629;11445 = High // one of Low, High
+TextureFilter@0;63279;8284 = aniso 16x // one of aniso 2x, aniso 4x, aniso 8x, aniso 16x
+BulletImpacts@0;57752;20945 = true
+'@
+$hashes=@{}
+foreach($slot in @(0,1)) {
+    $path=Join-Path $root "s.1.0.cod25.txt$slot"
+    # Paired files can contain different preferences; never copy one over the other.
+    [IO.File]::WriteAllText($path,($text+"`r`nMouseSensitivity@0;1;1 = $slot"))
+    $hashes[$path]=Get-Mw4Hash ([IO.File]::ReadAllBytes($path))
+}
+Invoke-Mw4Optimization
+foreach($path in $hashes.Keys) {
+    $actual=[IO.File]::ReadAllText($path)
+    if($actual -notmatch 'DepthOfField@0;57752;20945 = false' -or $actual -notmatch 'DepthOfField@1;29449;43096 = Off //'){throw 'Warzone depth of field stayed enabled'}
+    foreach($line in $text -split "\r?\n" | Where-Object {$_ -notmatch '^DepthOfField@[01];'}) {
+        if(-not $actual.Contains($line)){throw "Unexpected change: $line"}
+    }
+}
+Invoke-Mw4Optimization
+if(@(Get-ChildItem -LiteralPath (Get-Mw4BackupRoot) -Directory).Count -ne 1){throw 'No-op replaced original backup'}
+Restore-Mw4Optimization
+foreach($path in $hashes.Keys) {if((Get-Mw4Hash ([IO.File]::ReadAllBytes($path))) -ne $hashes[$path]){throw 'Paired config did not restore exactly'}}
+''')
+        self.assertEqual(sum(r['Status'] == 'Applied' for r in rows), 6)
+        self.assertFalse(any(r['Status'] == 'Failed' for r in rows))
+
+    def test_older_warzone_configs_accept_bracketed_domains_and_preserve_unknown_values(self):
+        rows = self.run_case(r'''
+$text=@'
+DepthOfField:0.0 = "true"
+MotionBlur:0.0 = "On" // one of [Off, On, Cinematic Only]
+NvidiaReflex:0.0 = "Enabled" // one of [Disabled, Enabled, Enabled + boost]
+SSRMode:0.0 = "Deferred HQ" // one of [Off, Deferred LQ, Deferred HQ]
+SSRMode:1.0 = "Future" // one of [Future, New Mode]
+TextureFilter:0.0 = "TEXTURE_FILTER_ANISO16X"
+'@
+$path=Join-Path $root 'options.3.cod22.txt'
+[IO.File]::WriteAllText($path,$text)
+if(@(Get-Mw4Files).Count -ne 1){throw 'Older retail config was not discovered'}
+$converted=Convert-Mw4Config $text $true
+if($converted.Changes.Count -ne 4 -or $converted.Skipped -ne 1){throw 'Older compatible settings were skipped'}
+if($converted.Text -notmatch 'NvidiaReflex:0.0 = "Enabled \+ boost" // one of \['){throw 'Bracketed Reflex domain did not retain formatting'}
+Invoke-Mw4Optimization
+if([IO.File]::ReadAllText($path) -cne (Convert-Mw4Config $text $false).Text){throw 'Applied config differs from preset'}
+Restore-Mw4Optimization
+if([IO.File]::ReadAllText($path) -cne $text){throw 'Older config restore differs'}
+''')
+        self.assertEqual(sum(r['Status'] == 'Applied' for r in rows), 4)
+        self.assertFalse(any(r['Status'] == 'Failed' for r in rows))
+
     def test_real_file_apply_backup_rerun_and_restore_preserve_bytes(self):
         rows = self.run_case(r'''
 $original="1`r`nWeaponMotionBlur@0;1;1 = true`r`nCustom@0;1;1 = cafe`r`n"

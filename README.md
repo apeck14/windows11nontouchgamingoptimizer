@@ -9,7 +9,7 @@ Extract the complete ZIP; run `win11_nontouch_gaming_optimiser.bat` as administr
 - **1 Full optimization:** Windows tweaks plus quick cleanup. Defaults to memory integrity (HVCI) off and Game DVR recording off; the latter has an opt-out prompt. Disabling HVCI reduces security and can affect anti-cheat compatibility. Recovery can re-enable it.
 - **2 Quick cleanup:** recycle user temp files older than 30 days.
 - **3 Deep cleanup:** storage estimates in GB; automatically recycle identical loose installer/archive downloads, retaining one copy. Other candidates require selection. Installed apps remain installed. Requires `Out-GridView`.
-- **4 MW4 / Warzone:** separate competitive preset for existing compatible game keys and NVIDIA application profiles. Shared configs/profiles may affect other Call of Duty titles. Prioritizes latency and lower effects costs; preserves textures, upscaling, FOV and controls. Tearing and higher GPU power use are possible.
+- **4 MW4 / Warzone:** separate competitive preset for compatible keys in current and older configs, plus NVIDIA application profiles. Shared configs/profiles may affect other Call of Duty titles. Prioritizes latency and lower effects costs; preserves textures, upscaling, FOV and controls. Tearing and higher GPU power use are possible.
 
 Full optimization attempts a verified restore point; failure defaults to cancellation. **R Recovery** opens System Restore, creates checkpoints and provides partial undo. Restore points can expire; partial undo is not a full backup. Standalone cleanup creates no checkpoint. Recycled files occupy space until the bin is emptied; Storage Sense can empty it independently.
 

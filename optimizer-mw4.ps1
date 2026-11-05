@@ -25,7 +25,7 @@ function Get-Mw4Files {
     foreach ($root in Get-Mw4Roots) {
         if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
         Get-ChildItem -LiteralPath $root -File -Force | Where-Object {
-            $_.Name -match '^(?:s\.\d+(?:\.\d+)*\.cod\d+\.txt[01]?|options\.\d+\.cod\d+\.cst)$'
+            $_.Name -match '^(?:s\.\d+(?:\.\d+)*\.cod\d+\.txt[01]?|options\.\d+\.cod\d+\.(?:cst|txt))$'
         } | Sort-Object Name
     }
 }
@@ -37,9 +37,9 @@ function Convert-Mw4Config {
         VSync=@('disabled'); CapFps=@('false')
         DLSSFrameGeneration=@('false'); FSRFrameInterpolation=@('false'); IntelXeFG=@('false')
         DxrMode=@('Off'); MotionBlur=@('Off'); WeaponMotionBlur=@('false'); EnableVelocityBasedBlur=@('false')
-        DofEnable=@('Off'); DofWeaponDisable=@('true'); DofWorldDisable=@('true'); FilmGrain=@('0')
+        DepthOfField=@('Off','false'); DofEnable=@('Off'); DofWeaponDisable=@('true'); DofWorldDisable=@('true'); FilmGrain=@('0')
         ShadowQuality=@('Low','Very_Low'); ShadowFilteringQuality=@('Low'); TerrainQuality=@('Low','Very Low')
-        ShaderQuality=@('Low'); ShadingQuality=@('Low'); SSRQuality=@('Off'); ReflectionProbeHalfResolution=@('true')
+        ShaderQuality=@('Low'); ShadingQuality=@('Low'); SSRQuality=@('Off'); SSRMode=@('Off'); ReflectionProbeHalfResolution=@('true')
         ParticleQuality=@('low','very low'); DeferredPhysics=@('Low Quality','Off')
         WaterCausticsMode=@('Off'); WaterWaveWetness=@('false'); WeatherGridVolumesQuality=@('Low','Off')
         AmbientLightingQuality=@('Low','Off'); ScreenSpaceShadowQuality=@('Low','Off')
@@ -59,10 +59,14 @@ function Convert-Mw4Config {
         $current = if ($quoted) { $raw.Substring(1,$raw.Length-2) } else { $raw }
         $target = $rules[$key][0]
         if ($current -cin $rules[$key]) { return $m.Value }
+        # Warzone writes DepthOfField as both a boolean and an enum, even in one file.
+        if ($key -eq 'DepthOfField' -and $current -ceq 'true') { $target='false' }
         $comment = $m.Groups['suffix'].Value
         $compatible = $false
         if ($comment -match '//\s*one of (.+)$') {
-            $allowed = @($Matches[1] -split ',\s*' | ForEach-Object { $_.Trim().Trim('"') })
+            $values = $Matches[1].Trim()
+            if ($values.StartsWith('[') -and $values.EndsWith(']')) { $values=$values.Substring(1,$values.Length-2) }
+            $allowed = @($values -split ',\s*' | ForEach-Object { $_.Trim().Trim('"') })
             $compatible = $target -cin $allowed -and $current -cin $allowed
         } elseif ($target -in @('true','false')) {
             $compatible = $current -cin @('true','false')
