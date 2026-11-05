@@ -155,6 +155,12 @@ function Invoke-RegistryChange {
     $matches = if ($action -ieq 'add') { Test-RegistryValue $before $type $value } else { -not $before.Exists }
     if ($matches) { Write-OperationResult AlreadyConfigured "$path [$name]" 'Requested registry state is already present.' $true; return }
     $result = Invoke-NativeOperation reg $Tokens[1..($Tokens.Count-1)]
+    if ($result.Code -ne 0 -and $action -ieq 'add' -and $name -ieq 'TaskbarDa' -and
+        $path -ieq 'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -and
+        $type -eq 'REG_DWORD' -and $value -eq '0' -and $result.Output -match 'access.*denied|0x80070005') {
+        Write-OperationResult Unsupported 'Widgets taskbar button' ("Windows denied this optional setting; left unchanged. " + $result.Output.Trim())
+        return
+    }
     if ($result.Code -ne 0) { throw "reg.exe returned $($result.Code): $($result.Output.Trim())" }
     $after = Get-RegistryState $path $name
     $matches = if ($action -ieq 'add') { Test-RegistryValue $after $type $value } else { -not $after.Exists }

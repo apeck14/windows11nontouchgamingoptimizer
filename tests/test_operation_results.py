@@ -195,6 +195,23 @@ if($script:invocations -ne 1){throw 'Unsupported or already configured feature w
 ''')
         self.assertEqual([r['Status'] for r in rows], ['Unsupported','AlreadyConfigured','AlreadyConfigured','RestartRequired','Failed'])
 
+    def test_denied_widgets_button_is_skipped_without_hiding_registry_failures(self):
+        rows, output = self.run_case(r'''
+function Get-RegistryState {param($Path,$Name) @{Exists=$false}}
+$script:diagnostic='ERROR: Access is denied.'
+function Invoke-NativeOperation {param($Program,$Arguments) [pscustomobject]@{Code=1;Output=$script:diagnostic}}
+$prefix='Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v '
+$null=Invoke-Operation ($prefix+'TaskbarDa /t REG_DWORD /d 0 /f')
+$null=Invoke-Operation ($prefix+'TaskbarAnimations /t REG_DWORD /d 0 /f')
+$script:diagnostic='ERROR: Invalid syntax.'
+$null=Invoke-Operation ($prefix+'TaskbarDa /t REG_DWORD /d 0 /f')
+''')
+        self.assertEqual([r['Status'] for r in rows], ['Unsupported', 'Failed', 'Failed'])
+        self.assertFalse(rows[0]['Verified'])
+        self.assertIn('Access is denied', rows[0]['Detail'])
+        self.assertNotIn('[ERROR] Widgets taskbar button', output)
+        self.assertEqual(output.count('[ERROR]'), 2)
+
     def test_missing_executable_cannot_reuse_a_success_exit_code(self):
         rows, _ = self.run_case(r'''
 function Test-Path {param($LiteralPath,$PathType) $false}
