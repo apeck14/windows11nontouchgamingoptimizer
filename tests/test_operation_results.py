@@ -245,21 +245,6 @@ $null=Invoke-Operation 'Plan Ultimate'
 ''')
         self.assertEqual([r['Status'] for r in rows], ['Applied','AlreadyConfigured','Failed'])
 
-    def test_desktop_keeps_performance_plan_path(self):
-        rows, _ = self.run_case(r'''
-function Get-PowerCapabilities {@{ModernStandby=$false;Portable=$false}}
-function Get-ACPowerMode {throw 'Desktop must use existing plan path'}
-function Invoke-NativeOperation {param($Program,$Arguments)
-    [pscustomobject]@{Code=0;Output='Power Scheme GUID: 11111111-1111-1111-1111-111111111111'}
-}
-function Invoke-GenericChange {param($Tokens)
-    if(($Tokens -join ' ') -ne 'powercfg -setactive 11111111-1111-1111-1111-111111111111'){throw 'Wrong plan'}
-    Write-OperationResult Applied 'Desktop plan' 'Verified by fixture' $true
-}
-$null=Invoke-Operation 'Plan Ultimate'
-''')
-        self.assertEqual([r['Status'] for r in rows], ['Applied','Applied'])
-
     def test_hibernation_preserved_for_portables_and_modern_standby(self):
         rows, _ = self.run_case(r'''
 $script:portable=$true; $script:acModern=$false

@@ -2,6 +2,7 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 set "SCRIPT_DIR=%~dp0"
+set "REGISTRY_BACKUP_DONE="
 pushd "%SCRIPT_DIR%" >nul 2>&1
 
 title Windows 11 Non-Touch Gaming Optimizer - by Matt Hurley
@@ -412,13 +413,6 @@ echo [*] Applying the performance power setting supported by this hardware...
 call :RunOperation Plan Ultimate
 
 echo [*] Tuning Game Mode, GPU scheduling, and visual effects...
-if not defined MOUSE_BACKUP_DONE (
-    if not exist "%LOG_DIR%\mouse_settings_backup.reg" (
-        call :RunOperation Native reg export "HKCU\Control Panel\Mouse" "%LOG_DIR%\mouse_settings_backup.reg" /y
-        call :Log "Mouse settings backed up to %LOG_DIR%\mouse_settings_backup.reg"
-    )
-    set "MOUSE_BACKUP_DONE=1"
-)
 call :RunOperation Registry reg add "HKCU\Software\Microsoft\GameBar" /v AllowAutoGameMode /t REG_DWORD /d 1 /f
 call :RunOperation Registry reg add "HKCU\Software\Microsoft\GameBar" /v AutoGameModeEnabled /t REG_DWORD /d 1 /f
 if "%DISABLE_DVR%"=="1" (
@@ -1298,18 +1292,12 @@ call :Log "Detected storage type: %STORAGE_TYPE%"
 exit /b 0
 
 :BackupRegistryKeys
-if exist "%LOG_DIR%\registry_backup_%STAMP%.txt" exit /b 0
+if defined REGISTRY_BACKUP_DONE exit /b 0
 call :Log "Backing up selected registry keys"
 echo [*] Creating registry backup before changes...
-set "BACKUP_FILE=%LOG_DIR%\registry_backup_%STAMP%.txt"
-(
-    echo Selected registry exports are stored separately in backup_*_%STAMP%.reg
-    echo.
-    echo ; Gaming Optimizer Registry Backup - %STAMP%
-    echo This is a manifest, not a full registry backup or an importable REG file.
-    echo.
-) > "%BACKUP_FILE%"
-call :RunOperation Native reg export "HKCU\Control Panel\Mouse" "%LOG_DIR%\backup_mouse_%STAMP%.reg" /y
+if not exist "%LOG_DIR%\mouse_settings_backup.reg" (
+    call :RunOperation Native reg export "HKCU\Control Panel\Mouse" "%LOG_DIR%\mouse_settings_backup.reg" /y
+)
 call :RunOperation Native reg export "HKCU\Software\Microsoft\GameBar" "%LOG_DIR%\backup_gamebar_%STAMP%.reg" /y
 call :RunOperation Native reg export "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" "%LOG_DIR%\backup_gamedvr_%STAMP%.reg" /y
 call :RunOperation Native reg export "HKCU\System\GameConfigStore" "%LOG_DIR%\backup_gameconfig_%STAMP%.reg" /y
@@ -1319,9 +1307,8 @@ call :RunOperation Native reg export "HKCU\Software\Microsoft\Windows\CurrentVer
 call :RunOperation Native reg export "HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection" "%LOG_DIR%\backup_telemetry_%STAMP%.reg" /y
 call :Log "Registry backup attempts finished: %LOG_DIR%\backup_*_%STAMP%.reg"
 echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
+set "REGISTRY_BACKUP_DONE=1"
 exit /b 0
-
-
 
 :ShowChangesSummary
 set "RESULT_SUMMARY_SHOWN=1"

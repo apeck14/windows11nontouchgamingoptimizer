@@ -26,9 +26,7 @@ Logs and `operation_results_<timestamp>.jsonl` are saved in `logs/`. Results dis
 
 Review failures and restart-required entries before rerunning. Pending Windows servicing requires a restart before retrying deferred cleanup. Use the individual menu actions when only part of a run needs repeating.
 
-**System Restore is not a full backup:** use **R** (or `rstrui.exe`) and select the logged Gaming Optimizer checkpoint. Windows can expire restore points; deleted files and every removed app are not guaranteed recoverable. Full recovery requires a separate system-image/data backup made before optimization.
-
-**Undo is partial:** it resets selected settings to chosen defaults, not your original configuration. Registry exports cover selected keys only. Removed apps and deleted files are not recovered. Keep an independent backup.
+**Recovery:** use **R** (or `rstrui.exe`) and select the logged Gaming Optimizer checkpoint. Restore points can expire and are not full backups. **Undo** restores the saved mouse settings and resets selected settings to defaults; it does not fully reverse optimization. Registry exports cover selected keys only. Full recovery, including deleted files and removed apps, requires an independent backup made beforehand.
 
 ## Development
 

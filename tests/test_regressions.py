@@ -103,6 +103,20 @@ class Regressions(unittest.TestCase):
                 self.assertEqual(events[0], expected)
                 self.assertTrue(set(events) <= {expected, 'PauseReturn', 'Menu'})
 
+    def test_registry_backup_runs_once_and_preserves_mouse_baseline(self):
+        body = ':BackupTwice\ncall :BackupRegistryKeys\ncall :BackupRegistryKeys\nexit /b 0\n' + mock_commands(routine('BackupRegistryKeys'))
+        for baseline_exists in [False, True]:
+            with self.subTest(baseline_exists=baseline_exists):
+                prelude = 'set "REGISTRY_BACKUP_DONE="\n'
+                if baseline_exists:
+                    prelude += 'type nul > "%LOG_DIR%\\mouse_settings_backup.reg"\n'
+                result, trace, _ = self.run_batch(body, 'BackupTwice', extra=LOG + MOCK, prelude=prelude)
+                self.assertEqual(result.returncode, 0)
+                exports = [line for line in trace.splitlines() if 'reg export' in line]
+                self.assertEqual(len(exports), 7 if baseline_exists else 8)
+                self.assertEqual(sum('mouse_settings_backup.reg' in line for line in exports), int(not baseline_exists))
+                self.assertFalse(list(self.work.glob('registry_backup_*.txt')))
+
     def test_restore_success_and_failures(self):
         body = re.sub(r'^call :RunOperation Restore Create', 'call :Checkpoint',
                       routine('CreateRestorePoint'), flags=re.M)
