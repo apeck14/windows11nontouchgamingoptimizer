@@ -1073,6 +1073,7 @@ function Measure-StorageRoots {param($Roots,[switch]$ReviewFolders)
     if(-not $ReviewFolders){throw 'Folder review requires no second scan'}
     [pscustomobject]@{Category='Documents';Path='C:\Documents';Bytes=12GB;Partial=$true;Folders=@(
         [pscustomobject]@{Path='C:\Documents\Arbitrary Folder';Bytes=12GB;Latest=[datetime]::UtcNow.AddDays(-200);Partial=$false},
+        [pscustomobject]@{Path='C:\Documents\Small Folder';Bytes=4KB;Latest=[datetime]::UtcNow.AddDays(-200);Partial=$false},
         [pscustomobject]@{Path='C:\Documents\Recent';Bytes=20GB;Latest=[datetime]::UtcNow;Partial=$false},
         [pscustomobject]@{Path='C:\Documents\Incomplete';Bytes=20GB;Latest=[datetime]::UtcNow.AddDays(-300);Partial=$true}
     )}
@@ -1080,6 +1081,7 @@ function Measure-StorageRoots {param($Roots,[switch]$ReviewFolders)
 Show-StorageSummary
 ''')
         self.assertIn('12.00', output)
+        self.assertRegex(output, r'<0\.01\s+\d+\s+C:\\Documents\\Small Folder')
         self.assertIn('Days since change', output)
         self.assertIn('Arbitrary Folder', output)
         self.assertNotIn('C:\\Documents\\Recent', output)

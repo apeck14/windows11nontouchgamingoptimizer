@@ -148,7 +148,7 @@ function Show-StorageSummary {
     } | Sort-Object Bytes -Descending | Select-Object -First 15)
     if ($oldFolders.Count) {
         Write-Host "`nFOLDERS WITH NO RECENT CONTENT CHANGES - largest 15, at scan time"
-        $oldFolders | Select-Object @{n='Size GB';e={'{0:N2}' -f ($_.Bytes/1GB)}},
+        $oldFolders | Select-Object @{n='Size GB';e={if ($_.Bytes -lt 0.01GB) {'<0.01'} else {'{0:N2}' -f ($_.Bytes/1GB)}}},
             @{n='Days since change';e={[math]::Floor(([datetime]::UtcNow-[datetime]$_.Latest).TotalDays)}},Path |
             Format-Table -AutoSize -Wrap | Out-String -Width 200 | Write-Host
         Write-Host 'Based on creation/modification timestamps, not last use. Inspect manually; age alone does not trigger recycling.'
