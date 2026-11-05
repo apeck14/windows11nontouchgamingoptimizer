@@ -219,8 +219,8 @@ $null=Invoke-Operation 'Pagefile Auto'
 
     def test_real_read_only_registry_check_does_not_invoke_a_write(self):
         rows, _ = self.run_case(r'''
-$path='HKCU\Control Panel\Desktop'
-$name='MenuShowDelay'
+$path='HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+$name='ProductName'
 $before=Get-RegistryState $path $name
 if(-not $before.Exists){throw 'Read-only fixture value is unavailable'}
 $types=@{String='REG_SZ';DWord='REG_DWORD'}

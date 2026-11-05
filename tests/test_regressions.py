@@ -40,8 +40,7 @@ exit /b 0
 
 
 def mock_commands(body):
-    # This function is deliberately limited to routines tested below. Fail if a
-    # test adds an unknown real operation instead of quietly running it.
+    # Replace mutations in extracted routines with trace-only stubs.
     body = re.sub(r'(?mi)^(\s*)call :RunOperation ', r'\1call :MockCommand ', body)
     body = re.sub(r'(?mi)^(\s*)(reg|sc|bcdedit|schtasks|powercfg) ',
                   r'\1call :MockCommand \2 ', body)
