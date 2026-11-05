@@ -567,9 +567,6 @@ function Get-NativeDesiredState {
     }
     if ($exe -eq 'powercfg' -and $Tokens[1] -eq '-setacvalueindex') {
         $scheme = $Tokens[2]
-        if ($scheme -eq 'SCHEME_CURRENT') {
-            $scheme = Get-ActivePowerScheme
-        }
         $aliases = @{SUB_PROCESSOR='54533251-82be-4824-96c1-47b60b740d00';CPMINCORES='0cc5b647-c1df-4637-891a-dec35c318583'}
         $group = $Tokens[3]; $setting = $Tokens[4]
         if ($aliases.ContainsKey($group)) { $group=$aliases[$group] }

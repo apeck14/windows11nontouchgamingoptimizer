@@ -424,16 +424,12 @@ $script:valid=$false; $null=Invoke-Operation $op
     def test_power_setting_uses_effective_value_without_rewriting_it(self):
         rows, _ = self.run_case(r'''
 $guid='11111111-2222-3333-4444-555555555555'
-function Get-ActivePowerScheme {$guid}
-function Invoke-NativeOperation {param($Program,$Arguments)
-    if($Arguments[0] -ne '/getactivescheme'){throw 'Already effective setting must not be rewritten'}
-    [pscustomobject]@{Code=0;Output=$guid}
-}
+function Invoke-NativeOperation {throw 'Already effective setting must not be rewritten'}
 function Get-ACPowerValue {param($Scheme,$Group,$Setting)
     if($Scheme -ne $guid -or $Group -ne '54533251-82be-4824-96c1-47b60b740d00' -or $Setting -ne '0cc5b647-c1df-4637-891a-dec35c318583'){throw 'Power identifiers were not resolved'}
     100
 }
-$null=Invoke-Operation 'Native powercfg -setacvalueindex SCHEME_CURRENT SUB_PROCESSOR CPMINCORES 100'
+$null=Invoke-Operation "Native powercfg -setacvalueindex $guid SUB_PROCESSOR CPMINCORES 100"
 ''')
         self.assertEqual(rows[0]['Status'], 'AlreadyConfigured')
         self.assertTrue(rows[0]['Verified'])

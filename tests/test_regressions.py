@@ -313,13 +313,6 @@ exit /b %CHOICE_CODE%
             self.assertEqual(result.stderr, '')
             self.assertIn('STORAGE=' + media, result.stdout)
 
-    def test_os_caption_command_runs_through_cmd(self):
-        result, _, _ = self.run_batch(routine('DetectOS'), 'DetectOS', extra=LOG)
-        self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stderr, '')
-        self.assertIn('Detected:', result.stdout)
-        self.assertNotIn('Detected: Windows -', result.stdout)
-
     def test_embedded_powershell_parses(self):
         # Remove batch continuation/pipe escaping, then parse, never invoke.
         joined = SOURCE.replace('^\n', '').replace('^|', '|')

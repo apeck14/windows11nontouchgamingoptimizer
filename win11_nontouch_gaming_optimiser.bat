@@ -26,17 +26,7 @@ if defined ESC (
     set "CLR_RESET="
 )
 
-:: ---------------------------------------------------------------------------
-:: Windows 11 Non-Touch Gaming Optimizer
-:: by Matt Hurley
-::
-:: Menu-driven utility focused on:
-::   - Reviewing apps and disabling optional touch/pen components
-::   - Maximizing gaming FPS and responsiveness  
-::   - Optimizing network latency and throughput
-::   - Reducing RAM/CPU usage from background services
-::   - Changes are logged; undo is partial and cannot recover deleted files
-:: ---------------------------------------------------------------------------
+:: Originally by Matt Hurley; see README.md and LICENSE.
 
 set "POWERSHELL=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 
@@ -79,7 +69,6 @@ if errorlevel 1 (
 )
 call :Log "=== Windows 11 Non-Touch Gaming Optimizer started ==="
 
-call :DetectOS
 call :DetectHardware
 call :DetectChassisType
 if errorlevel 1 exit /b 1
@@ -762,22 +751,6 @@ if not defined MOUSE_RESTORED (
 call :Log "Undo routine completed"
 if not defined OPTIMIZER_FULL_RUN echo [*] Partial rollback attempted. Check the log; this is not a complete restore.
 echo     Check %LOG_FILE% for details. %CLR_WARNING%Restart recommended.%CLR_RESET%
-exit /b 0
-
-:DetectOS
-set "OS_CAPTION=Windows"
-set "OS_MAJOR=10"
-for /f "tokens=4 delims=[] " %%I in ('ver') do (
-    for /f "tokens=1 delims=." %%J in ("%%I") do set "OS_MAJOR=%%J"
-)
-for /f "usebackq delims=" %%I in (`""%POWERSHELL%" -NoProfile -Command "Get-CimInstance Win32_OperatingSystem ^| Select-Object -ExpandProperty Caption""`) do set "OS_CAPTION=%%I"
-call :Log "Detected OS: %OS_CAPTION% (major %OS_MAJOR%)"
-if %OS_MAJOR% GEQ 10 (
-    echo Detected: %OS_CAPTION% - Compatible
-) else (
-    echo [!] Warning: %OS_CAPTION% detected. This optimizer targets Windows 10/11.
-    call :Log "Warning - unsupported OS version"
-)
 exit /b 0
 
 :DetectHardware
