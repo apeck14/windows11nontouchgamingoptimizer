@@ -77,10 +77,38 @@ if($script:invocations -ne 1){throw 'Unsupported or already configured feature w
         rows, _ = self.run_case(r'''
 function Get-AppxPackage {param($Name,$ErrorAction) @()}
 function Get-AppxProvisionedPackage {param([switch]$Online,$ErrorAction) throw 'Access is denied.'}
-$null=Invoke-Operation 'Appx Example.App'
+if ((Invoke-Operation 'Appx Example.App') -ne 1) {throw 'App removal failure returned success'}
 ''')
         self.assertEqual([r['Status'] for r in rows], ['AlreadyConfigured','Failed'])
         self.assertIn('provisioning', rows[1]['Operation'])
+
+    def test_app_absence_returns_success_without_removal(self):
+        rows, _ = self.run_case(r'''
+function Get-AppxPackage {param($Name,$ErrorAction) @()}
+function Get-AppxProvisionedPackage {param([switch]$Online,$ErrorAction) @()}
+function Remove-AppxPackage {throw 'Absent app must not be removed'}
+function Remove-AppxProvisionedPackage {throw 'Absent app must not be removed'}
+if ((Invoke-Operation 'Appx Example.App') -ne 0) {throw 'Absent app returned failure'}
+''')
+        self.assertEqual([r['Status'] for r in rows], ['AlreadyConfigured','AlreadyConfigured'])
+
+    def test_missing_executable_cannot_reuse_a_success_exit_code(self):
+        rows, _ = self.run_case(r'''
+function Test-Path {param($LiteralPath,$PathType) $false}
+$global:LASTEXITCODE = 0
+if ((Invoke-Operation 'Native powercfg -attributes X Y -ATTRIB_HIDE') -ne 1) {throw 'Missing executable returned success'}
+''')
+        self.assertEqual([r['Status'] for r in rows], ['Failed'])
+        self.assertIn('Native program is missing', rows[0]['Detail'])
+
+    def test_empty_journal_reports_no_operations(self):
+        rows, stdout = self.run_case(r'''
+[IO.File]::WriteAllText($env:OPTIMIZER_RESULTS, '')
+if ((Show-OperationSummary) -ne 0) {throw 'Empty journal returned failure'}
+''')
+        self.assertEqual(rows, [])
+        self.assertIn('No operations recorded', stdout)
+        self.assertNotIn('All supported, attempted operations have verified', stdout)
 
     def test_native_unknown_and_failure_have_distinct_results(self):
         rows, _ = self.run_case(r'''

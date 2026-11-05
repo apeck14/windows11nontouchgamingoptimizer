@@ -42,6 +42,7 @@ function Invoke-NativeOperation {
     $name = [IO.Path]::GetFileNameWithoutExtension($Program).ToLowerInvariant()
     if ($name -notin $allowed) { throw "Native program is not allowed: $Program" }
     $path = Join-Path $env:SystemRoot "System32\$name.exe"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Native program is missing: $path" }
     # PowerShell 5.1 must not turn native stderr records into terminating errors.
     $saved = $ErrorActionPreference
     try {
@@ -171,6 +172,7 @@ function Invoke-FeatureChange {
 
 function Invoke-AppRemoval {
     param([string]$Name)
+    $failed = $false
     # Preserve existing effective scope: current account plus provisioning.
     # Each scope has an independent result; enumeration failure is never absence.
     try {
@@ -182,7 +184,7 @@ function Invoke-AppRemoval {
             if (@(Get-AppxPackage -Name $Name -ErrorAction Stop).Count) { throw 'Package remains registered after removal.' }
             Write-OperationResult Applied "App $Name (current user)" 'Removal verified.' $true
         }
-    } catch { Write-OperationResult Failed "App $Name (current user)" $_.Exception.Message }
+    } catch { $failed = $true; Write-OperationResult Failed "App $Name (current user)" $_.Exception.Message }
     try {
         $packages = @(Get-AppxProvisionedPackage -Online -ErrorAction Stop | Where-Object DisplayName -EQ $Name)
         if (-not $packages.Count) { Write-OperationResult AlreadyConfigured "App $Name (provisioning)" 'Not provisioned.' $true }
@@ -191,7 +193,8 @@ function Invoke-AppRemoval {
             if (@(Get-AppxProvisionedPackage -Online -ErrorAction Stop | Where-Object DisplayName -EQ $Name).Count) { throw 'Package remains provisioned after removal.' }
             Write-OperationResult Applied "App $Name (provisioning)" 'Removal verified for future users.' $true
         }
-    } catch { Write-OperationResult Failed "App $Name (provisioning)" $_.Exception.Message }
+    } catch { $failed = $true; Write-OperationResult Failed "App $Name (provisioning)" $_.Exception.Message }
+    return -not $failed
 }
 
 function Invoke-MemoryChange {
@@ -332,6 +335,7 @@ function Invoke-GenericChange {
 function Show-OperationSummary {
     if (-not (Test-Path -LiteralPath $env:OPTIMIZER_RESULTS)) { Write-Host 'No operations recorded in this session.'; return 0 }
     $entries = @(Get-Content -LiteralPath $env:OPTIMIZER_RESULTS | ForEach-Object { $_ | ConvertFrom-Json -ErrorAction Stop })
+    if (-not $entries.Count) { Write-Host 'No operations recorded in this session.'; return 0 }
     Write-Host "`nOPERATION RESULTS - cumulative for this session"
     $entries | Group-Object Status | Sort-Object Name | ForEach-Object { Write-Host ('  {0}: {1}' -f $_.Name, $_.Count) }
     $attention = @($entries | Where-Object Status -In @('Failed','RestartRequired','Unverified','Unsupported'))
@@ -355,7 +359,7 @@ function Invoke-Operation {
             Service { Invoke-ServiceChange $tokens[1..($tokens.Count-1)] }
             Task { Invoke-TaskChange $tokens[1..($tokens.Count-1)] }
             Feature { Invoke-FeatureChange $tokens[1] $tokens[2] }
-            Appx { Invoke-AppRemoval $tokens[1] }
+            Appx { if (-not (Invoke-AppRemoval $tokens[1])) { return 1 } }
             Memory { Invoke-MemoryChange $tokens[1] ($tokens[2] -eq '1') }
             Pagefile { Invoke-PagefileChange $tokens[1] }
             Plan { Invoke-PerformancePlan }
