@@ -640,7 +640,7 @@ if($script:recycles -ne 1){throw 'Changed file was recycled'}
 . (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
 $script:inventoryShown=$false
 function Get-CleanupCandidates {param($Scope) [pscustomobject]@{Path='example.zip';Modified=(Get-Date);Bytes=7}}
-function Show-AppInventory {param([switch]$Largest) $script:inventoryShown=$true}
+function Show-AppInventory { $script:inventoryShown=$true}
 function Get-DuplicateDownloads {}
 function Show-StorageSummary {}
 function Out-GridView {param($Title,[switch]$PassThru)}
@@ -682,20 +682,6 @@ $rows=@(Measure-StorageRoots @(
 ))
 if($rows.Count -ne 2 -or @($rows | Where-Object {-not $_.Partial -or $_.Bytes -ne 0}).Count){throw 'Unavailable data claimed as scanned'}
 ''')
-
-    def test_app_inventory_uses_gb_and_keeps_unknown_sizes_blank(self):
-        _, output = self.run_case(r'''
-. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
-function Get-ItemProperty {param($Path,$ErrorAction)
-    [pscustomobject]@{DisplayName='KnownApp';EstimatedSize=1572864;Publisher='Test'}
-    [pscustomobject]@{DisplayName='UnknownApp';Publisher='Test'}
-}
-function Get-AppxPackage {param($ErrorAction)}
-Show-AppInventory
-''')
-        self.assertIn('EstimatedGB', output)
-        self.assertRegex(output, r'KnownApp\s+Test\s+1[.,]5')
-        self.assertRegex(output, r'UnknownApp\s+Test\s*\n')
 
     def test_storage_summary_shows_gb_categories_and_investigation_paths(self):
         _, output = self.run_case(r'''
@@ -821,7 +807,7 @@ $null=New-Item -ItemType Directory $fixtureInstallPath -Force
 function Get-AppInventory {[pscustomobject]@{App='Example Game';Path=$fixtureInstallPath}}
 function Get-StorageRoots {[pscustomobject]@{Category='Apps';Path=$root}}
 function Measure-StorageRoots {param($Roots) [pscustomobject]@{Category='Example';Path=$fixtureInstallPath;Bytes=3GB;Partial=$false}}
-Show-AppInventory -Largest
+Show-AppInventory
 ''')
         self.assertIn('Example Game', output)
         self.assertIn('GB', output)

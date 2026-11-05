@@ -230,18 +230,14 @@ function Get-AppInventory {
         'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
         'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')
     $apps = @(Get-ItemProperty $paths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -and -not $_.SystemComponent } |
-        Select-Object @{n='App';e={$_.DisplayName}},Publisher,@{n='EstimatedGB';e={if ($null -ne $_.EstimatedSize) {[math]::Round($_.EstimatedSize/1MB,2)}}},@{n='Path';e={$_.InstallLocation}})
-    $apps += @(Get-AppxPackage -ErrorAction Stop | Select-Object @{n='App';e={$_.Name}},Publisher,@{n='EstimatedGB';e={$null}},@{n='Path';e={$_.InstallLocation}})
+        Select-Object @{n='App';e={$_.DisplayName}},@{n='Path';e={$_.InstallLocation}})
+    $apps += @(Get-AppxPackage -ErrorAction Stop | Select-Object @{n='App';e={$_.Name}},@{n='Path';e={$_.InstallLocation}})
     $apps | Sort-Object App,Path -Unique
 }
 
-function Show-AppInventory([switch]$Largest) {
+function Show-AppInventory {
     $apps = @(Get-AppInventory)
     Write-Host 'Installed apps are listed for review only; installed applications cannot be recycled safely.'
-    if (-not $Largest) {
-        $apps | Select-Object App,Publisher,EstimatedGB | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
-        return
-    }
     $roots = @(foreach ($base in @(Get-StorageRoots | Where-Object Category -eq 'Apps')) {
         foreach ($folder in @(Get-ChildItem -LiteralPath $base.Path -Directory -ErrorAction SilentlyContinue)) {
             [pscustomobject]@{Category=$folder.Name;Path=$folder.FullName}
@@ -274,7 +270,7 @@ function Invoke-RecycleCleanup([string]$Scope) {
     $success = $true
     if ($Scope -eq 'Deep') {
         Show-StorageSummary
-        Show-AppInventory -Largest
+        Show-AppInventory
         Write-Host 'Automatically recycling identical loose installer/archive downloads; the oldest-created copy is kept.'
         $success = Invoke-RecycleFiles @(Get-DuplicateDownloads)
     }
