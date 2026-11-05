@@ -18,7 +18,26 @@ Temporary-file cleanup accepts `%LOCALAPPDATA%\Temp`, `%SystemRoot%\Temp`, and t
 
 **Undo is a partial reset to chosen defaults, not restoration of your original configuration.** It requires confirmation and never enables Remote Registry or Routing and Remote Access. Registry exports cover selected keys only. Removed apps, deleted files, GPU settings, power settings, page-file settings, and other changes are not fully recovered by Undo. Keep an independent backup; System Restore is not a file backup.
 
-Run the non-administrative regression tests with `python tests/test_regressions.py`. They execute extracted batch routines with system changes stubbed out and test cleanup only inside a temporary test directory.
+Run the non-administrative regression tests with `python -m unittest discover -s tests -p "test_*.py" -v`. They execute extracted batch routines with system changes stubbed out and test cleanup only inside a temporary test directory.
+
+### Verified operation results
+
+The batch menu uses `optimizer-operations.ps1` to execute and journal requested operations. Both files are required. The script checks that its log and journal can be written before applying optimizations.
+
+Each operation records one of these outcomes in `logs/operation_results_<timestamp>.jsonl`:
+
+| Outcome | Meaning |
+| --- | --- |
+| Applied | The change completed and its result was checked. |
+| AlreadyConfigured | The requested state was already present; no repeated write was needed. |
+| Unsupported | The service, task, feature or removable app is unavailable on this installation. |
+| Failed | Execution, enumeration or read-back failed; the diagnostic is preserved. Some changes may already have occurred. |
+| RestartRequired | A saved configuration needs activation, or pending Windows servicing prevents completion. Read the detail to distinguish them. |
+| Unverified | The command exited successfully, but an independent state check is not implemented. This does not count as verified success. |
+
+Registry changes are compared before and after, including their value types. Services and scheduled tasks are read back. Optional features are checked for availability before changes. Current-user app removal and future-user provisioning have separate results; access denied is never treated as an absent app. Memory-manager and page-file changes are checked through Windows APIs. Boot configuration, selected power settings, TCP settings and TRIM are checked where supported. Other native commands retain their diagnostic output and are explicitly marked unverified.
+
+The final report lists failed, unsupported, restart-required and unverified operations instead of claiming everything succeeded. Results are cumulative for the current script session. The existing **[V]** screen is labelled as limited configuration checks; it is not a performance score or a replacement for the operation report. A matching registry value cannot prove an FPS improvement, hardware support or that a running driver has adopted the setting.
 
 ### Performance scope
 
@@ -70,7 +89,7 @@ Windows Update cache removal reclaims disk space, but updates may download those
 - System Protection enabled (recommended for restore points)
 
 ### **Installation**
-1. Download `win11_nontouch_gaming_optimiser.bat`
+1. Download and extract the repository ZIP. Keep `win11_nontouch_gaming_optimiser.bat` and `optimizer-operations.ps1` together in the same folder.
 2. Right-click the file → **Run as administrator**
 3. Follow the on-screen menu
 
@@ -340,7 +359,7 @@ Use option **[V]** to check your current optimization status:
 - Startup delay configuration
 - Core parking (CPMINCORES)
 
-The verification tool shows **[PASS]** or **[WARN]** for each check and displays a percentage score. Use this after Windows updates to ensure tweaks are still active.
+The legacy verification screen shows **[PASS]** or **[WARN]** for a limited set of configuration values. It is not a performance score and cannot confirm every tweak. Review the operation journal and current Windows state after updates.
 
 ---
 
@@ -375,7 +394,7 @@ The verification tool shows **[PASS]** or **[WARN]** for each check and displays
 
 ## 🔄 Update Guide (v2.4)
 
-1) **Download the new script**: Grab `win11_nontouch_gaming_optimiser.bat` from GitHub and replace your existing copy.
+1) **Download the updated files**: Extract the repository ZIP and replace both `win11_nontouch_gaming_optimiser.bat` and `optimizer-operations.ps1`. Keep them in the same folder.
 2) **Run as administrator**: Launch the script; the menu shows version **v2.4**.
 3) **Laptop users**: If detected as laptop, you'll see a battery warning with 10-second auto-cancel option.
 4) **Pick your DVR preference**: When prompted, choose whether to disable Game DVR for a small FPS gain (default is **keep capture on**).

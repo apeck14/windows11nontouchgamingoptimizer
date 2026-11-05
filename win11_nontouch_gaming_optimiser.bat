@@ -38,6 +38,12 @@ if defined ESC (
 
 set "POWERSHELL=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 
+set "OPERATIONS_SCRIPT=%SCRIPT_DIR%optimizer-operations.ps1"
+if not exist "%OPERATIONS_SCRIPT%" (
+    echo [!] Missing optimizer-operations.ps1. Download and extract the complete repository ZIP.
+    exit /b 1
+)
+
 set "RELAUNCHED="
 if /I "%~1"=="-Elevated" (
     set "RELAUNCHED=1"
@@ -54,6 +60,12 @@ for /f %%I in ('%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoP
 set "LOG_DIR=%SCRIPT_DIR%logs"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>&1
 set "LOG_FILE=%LOG_DIR%\nontouch_gaming_optimizer_%STAMP%.log"
+set "OPTIMIZER_RESULTS=%LOG_DIR%\operation_results_%STAMP%.jsonl"
+"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -File "%OPERATIONS_SCRIPT%" -Mode Initialize
+if errorlevel 1 (
+    echo [!] Cannot write the operation journal. No optimizations will be attempted.
+    exit /b 1
+)
 call :Log "=== Windows 11 Non-Touch Gaming Optimizer started ==="
 
 call :DetectOS
@@ -170,15 +182,15 @@ echo [*] Step 13/15: Disabling CPU core parking...
 call :DisableCoreParking
 echo [*] Step 14/15: Tuning storage-specific settings...
 call :OptimizeStorageByType
-echo [*] Step 15/15: Complete!
+echo [*] Step 15/15: Reviewing results...
 echo.
 echo ========================================================================
-echo   %CLR_SUCCESS%FULL OPTIMIZATION COMPLETE!%CLR_RESET%
+echo   %CLR_SUCCESS%FULL OPTIMIZATION ATTEMPTS FINISHED - REVIEW RESULTS%CLR_RESET%
 echo   Please %CLR_WARNING%RESTART%CLR_RESET% your device for all changes to take effect.
 echo ========================================================================
-call :Log "Full optimization sequence completed"
+call :Log "Full optimization attempts finished; review operation results"
 call :ShowChangesSummary
-exit /b 0
+exit /b %errorlevel%
 
 :RunRecommended
 call :Log "Running recommended sequence"
@@ -210,12 +222,12 @@ call :DisableCoreParking
 echo [*] Step 7/7: Finalizing...
 echo.
 echo ========================================================================
-echo   %CLR_SUCCESS%RECOMMENDED OPTIMIZATION COMPLETE!%CLR_RESET%
+echo   %CLR_SUCCESS%RECOMMENDED ATTEMPTS FINISHED - REVIEW RESULTS%CLR_RESET%
 echo   Please %CLR_WARNING%RESTART%CLR_RESET% your device for all changes to take effect.
 echo ========================================================================
-call :Log "Recommended optimization sequence completed"
+call :Log "Recommended optimization attempts finished; review operation results"
 call :ShowChangesSummary
-exit /b 0
+exit /b %errorlevel%
 
 :PrepareOptimization
 call :CreateRestorePoint
@@ -249,7 +261,8 @@ if errorlevel 1 (
     call :Log "Restore point creation failed"
     exit /b 1
 )
-echo %CLR_SUCCESS%[+] Restore point created successfully.%CLR_RESET%
+echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
+echo [+] Restore point created successfully.
 call :Log "Restore point created"
 exit /b 0
 
@@ -262,22 +275,23 @@ echo ========================================================================
 echo.
 echo [*] Applying low-risk tweaks for gaming (keeps Windows TCP defaults)...
 REM Keep global netsh defaults to reduce compatibility issues; apply only latency-friendly knobs.
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpNoDelay /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpAckFrequency /t REG_DWORD /d 1 /f >nul
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpNoDelay /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpAckFrequency /t REG_DWORD /d 1 /f
 
 REM Delivery Optimization (P2P updates) off for latency + bandwidth stability
-sc stop DoSvc >nul 2>&1
-sc config DoSvc start= disabled >nul 2>&1
+call :RunOperation Service sc stop DoSvc
+call :RunOperation Service sc config DoSvc start= disabled
 for %%T in ("\Microsoft\Windows\Delivery Optimization\Maintenance" "\Microsoft\Windows\Delivery Optimization\Download") do (
-    schtasks /Change /TN "%%~T" /Disable >nul 2>&1
+    call :RunOperation Task schtasks /Change /TN "%%~T" /Disable
 )
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" /v DODownloadMode /t REG_DWORD /d 0 /f >nul
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" /v DODownloadMode /t REG_DWORD /d 0 /f
 
-call :Log "SAFE network tweaks applied"
+call :Log "Safe network changes attempted; see results"
 call :AddToSummary "Network optimized (safe)"
 echo.
-echo %CLR_SUCCESS%[+] Safe network tweaks applied!%CLR_RESET% Low risk, good baseline.
+echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
 echo     Log: %LOG_FILE%
+REM Requested operations are recorded individually, including failures.
 exit /b 0
 
 :Debloat
@@ -321,11 +335,12 @@ for %%A in (
 )
 call :Log "Debloat: Spotify, Game Bar and Xbox app preserved"
 echo [*] Preserving Spotify and Xbox/Game Bar components.
-call :Log "Debloat routine complete"
+call :Log "Debloat attempts finished; see per-app results"
 call :AddToSummary "Bloatware removed"
 echo.
-echo %CLR_SUCCESS%[+] Debloat complete!%CLR_RESET% Removed consumer/OEM bloatware.
+echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
 echo     Log: %LOG_FILE%
+REM Requested operations are recorded individually, including failures.
 exit /b 0
 
 :DisableTouchFeatures
@@ -337,25 +352,26 @@ echo ========================================================================
 echo.
 echo [*] Disabling touchscreen, pen, handwriting, and touch keyboard components...
 for %%S in (TabletInputService TextInputManagementService TouchInput WTabletServiceCon WTabletServicePen PenService TabletInputHost) do (
-    sc stop %%S >nul 2>&1
-    sc config %%S start= disabled >nul 2>&1
+    call :RunOperation Service sc stop %%S
+    call :RunOperation Service sc config %%S start= disabled
 )
-reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v EnableTabletModeAutoSwitch /t REG_DWORD /d 0 /f >nul
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\ImmersiveShell" /v TabletMode /t REG_DWORD /d 0 /f >nul
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\ImmersiveShell" /v TabletModeAutoSwitch /t REG_DWORD /d 0 /f >nul
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\PenWorkspace" /v PenWorkspaceButtonDesiredVisibility /t REG_DWORD /d 0 /f >nul
-reg add "HKCU\Software\Microsoft\TabletTip\1.7" /v EnableAutocorrection /t REG_DWORD /d 0 /f >nul
-reg add "HKCU\Software\Microsoft\TabletTip\1.7" /v EnableTextPrediction /t REG_DWORD /d 0 /f >nul
-reg add "HKCU\Software\Microsoft\TabletTip\1.7" /v EnableSpellchecking /t REG_DWORD /d 0 /f >nul
-"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "Disable-WindowsOptionalFeature -Online -FeatureName 'TabletPC-OC' -NoRestart -ErrorAction SilentlyContinue" >> "%LOG_FILE%" 2>&1
-"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "Disable-WindowsOptionalFeature -Online -FeatureName 'InkAndHandwritingServices' -NoRestart -ErrorAction SilentlyContinue" >> "%LOG_FILE%" 2>&1
-reg add "HKCU\Software\Microsoft\Wisp\Pen\SysEventParameters" /v FlicksEnabled /t REG_DWORD /d 0 /f >nul
-reg add "HKCU\Software\Microsoft\Wisp\Touch" /v TouchGate /t REG_DWORD /d 0 /f >nul
-call :Log "Touch/pen features disabled"
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v EnableTabletModeAutoSwitch /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\ImmersiveShell" /v TabletMode /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\ImmersiveShell" /v TabletModeAutoSwitch /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\PenWorkspace" /v PenWorkspaceButtonDesiredVisibility /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\TabletTip\1.7" /v EnableAutocorrection /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\TabletTip\1.7" /v EnableTextPrediction /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\TabletTip\1.7" /v EnableSpellchecking /t REG_DWORD /d 0 /f
+call :RunOperation Feature Disable "TabletPC-OC"
+call :RunOperation Feature Disable "InkAndHandwritingServices"
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\Wisp\Pen\SysEventParameters" /v FlicksEnabled /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\Wisp\Touch" /v TouchGate /t REG_DWORD /d 0 /f
+call :Log "Touch/pen changes attempted; see results"
 call :AddToSummary "Touch/pen features disabled"
 echo.
-echo %CLR_SUCCESS%[+] Touch and pen components disabled!%CLR_RESET%
+echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
 echo     Log: %LOG_FILE%
+REM Requested operations are recorded individually, including failures.
 exit /b 0
 
 :GamingTweaksMenu
@@ -384,95 +400,91 @@ if not defined DVR_PREF_SET (
 )
 call :Log "Gaming tweaks: power plan"
 echo [*] Enabling Ultimate Performance plan (or High Performance fallback)...
-set "UP_GUID="
-for /f "tokens=4" %%G in ('powercfg -duplicatescheme e9a42b02-d5df-448d-aa00-03f14749eb61 2^>nul ^| find /i "GUID"') do set "UP_GUID=%%G"
-if not defined UP_GUID set "UP_GUID=e9a42b02-d5df-448d-aa00-03f14749eb61"
-powercfg -setactive %UP_GUID% >nul 2>&1
-if errorlevel 1 powercfg -setactive SCHEME_MIN >nul 2>&1
+call :RunOperation Plan Ultimate
 
 echo [*] Tuning Game Mode, GPU scheduling, and visual effects...
 if not defined MOUSE_BACKUP_DONE (
     if not exist "%LOG_DIR%\mouse_settings_backup.reg" (
-        reg export "HKCU\Control Panel\Mouse" "%LOG_DIR%\mouse_settings_backup.reg" /y >nul 2>&1
+        call :RunOperation Native reg export "HKCU\Control Panel\Mouse" "%LOG_DIR%\mouse_settings_backup.reg" /y
         call :Log "Mouse settings backed up to %LOG_DIR%\mouse_settings_backup.reg"
     )
     set "MOUSE_BACKUP_DONE=1"
 )
-reg add "HKCU\Software\Microsoft\GameBar" /v AllowAutoGameMode /t REG_DWORD /d 1 /f >nul
-reg add "HKCU\Software\Microsoft\GameBar" /v AutoGameModeEnabled /t REG_DWORD /d 1 /f >nul
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\GameBar" /v AllowAutoGameMode /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\GameBar" /v AutoGameModeEnabled /t REG_DWORD /d 1 /f
 if "%DISABLE_DVR%"=="1" (
-    reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\GameDVR" /v AllowGameDVR /t REG_DWORD /d 0 /f >nul
-    reg add "HKLM\SOFTWARE\Microsoft\PolicyManager\default\ApplicationManagement\AllowGameDVR" /v value /t REG_DWORD /d 0 /f >nul
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v AppCaptureEnabled /t REG_DWORD /d 0 /f >nul
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v GameDVR_Enabled /t REG_DWORD /d 0 /f >nul
-    reg add "HKCU\System\GameConfigStore" /v GameDVR_Enabled /t REG_DWORD /d 0 /f >nul
-    reg add "HKCU\System\GameConfigStore" /v GameDVR_FSEBehaviorMode /t REG_DWORD /d 2 /f >nul
-    reg add "HKCU\System\GameConfigStore" /v GameDVR_HonorUserFSEBehaviorMode /t REG_DWORD /d 1 /f >nul
-    reg add "HKCU\System\GameConfigStore" /v GameDVR_DXGIHonorFSEWindowsCompatible /t REG_DWORD /d 1 /f >nul
-    call :Log "Gaming tweaks: Game DVR disabled by user"
+    call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\GameDVR" /v AllowGameDVR /t REG_DWORD /d 0 /f
+    call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\PolicyManager\default\ApplicationManagement\AllowGameDVR" /v value /t REG_DWORD /d 0 /f
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v AppCaptureEnabled /t REG_DWORD /d 0 /f
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v GameDVR_Enabled /t REG_DWORD /d 0 /f
+    call :RunOperation Registry reg add "HKCU\System\GameConfigStore" /v GameDVR_Enabled /t REG_DWORD /d 0 /f
+    call :RunOperation Registry reg add "HKCU\System\GameConfigStore" /v GameDVR_FSEBehaviorMode /t REG_DWORD /d 2 /f
+    call :RunOperation Registry reg add "HKCU\System\GameConfigStore" /v GameDVR_HonorUserFSEBehaviorMode /t REG_DWORD /d 1 /f
+    call :RunOperation Registry reg add "HKCU\System\GameConfigStore" /v GameDVR_DXGIHonorFSEWindowsCompatible /t REG_DWORD /d 1 /f
+    call :Log "Gaming tweaks: Game DVR disable requested by user"
 ) else (
-    reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\GameDVR" /v AllowGameDVR /t REG_DWORD /d 1 /f >nul
-    reg add "HKLM\SOFTWARE\Microsoft\PolicyManager\default\ApplicationManagement\AllowGameDVR" /v value /t REG_DWORD /d 1 /f >nul
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v AppCaptureEnabled /t REG_DWORD /d 1 /f >nul
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v GameDVR_Enabled /t REG_DWORD /d 1 /f >nul
-    reg add "HKCU\System\GameConfigStore" /v GameDVR_Enabled /t REG_DWORD /d 1 /f >nul
-    reg add "HKCU\System\GameConfigStore" /v GameDVR_FSEBehaviorMode /t REG_DWORD /d 2 /f >nul
-    reg add "HKCU\System\GameConfigStore" /v GameDVR_HonorUserFSEBehaviorMode /t REG_DWORD /d 1 /f >nul
-    reg add "HKCU\System\GameConfigStore" /v GameDVR_DXGIHonorFSEWindowsCompatible /t REG_DWORD /d 1 /f >nul
-    call :Log "Gaming tweaks: Game DVR kept enabled for Game Bar capture"
+    call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\GameDVR" /v AllowGameDVR /t REG_DWORD /d 1 /f
+    call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\PolicyManager\default\ApplicationManagement\AllowGameDVR" /v value /t REG_DWORD /d 1 /f
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v AppCaptureEnabled /t REG_DWORD /d 1 /f
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v GameDVR_Enabled /t REG_DWORD /d 1 /f
+    call :RunOperation Registry reg add "HKCU\System\GameConfigStore" /v GameDVR_Enabled /t REG_DWORD /d 1 /f
+    call :RunOperation Registry reg add "HKCU\System\GameConfigStore" /v GameDVR_FSEBehaviorMode /t REG_DWORD /d 2 /f
+    call :RunOperation Registry reg add "HKCU\System\GameConfigStore" /v GameDVR_HonorUserFSEBehaviorMode /t REG_DWORD /d 1 /f
+    call :RunOperation Registry reg add "HKCU\System\GameConfigStore" /v GameDVR_DXGIHonorFSEWindowsCompatible /t REG_DWORD /d 1 /f
+    call :Log "Gaming tweaks: Game DVR enable requested for Game Bar capture"
 )
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" /v HwSchMode /t REG_DWORD /d 2 /f >nul
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 0 /f >nul
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" /v VisualFXSetting /t REG_DWORD /d 2 /f >nul
-reg add "HKCU\Control Panel\Desktop" /v MenuShowDelay /t REG_SZ /d 0 /f >nul
-reg add "HKCU\Control Panel\Desktop" /v WaitToKillAppTimeout /t REG_SZ /d 2000 /f >nul
-reg add "HKCU\Control Panel\Desktop" /v HungAppTimeout /t REG_SZ /d 1000 /f >nul
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" /v HwSchMode /t REG_DWORD /d 2 /f
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" /v VisualFXSetting /t REG_DWORD /d 2 /f
+call :RunOperation Registry reg add "HKCU\Control Panel\Desktop" /v MenuShowDelay /t REG_SZ /d 0 /f
+call :RunOperation Registry reg add "HKCU\Control Panel\Desktop" /v WaitToKillAppTimeout /t REG_SZ /d 2000 /f
+call :RunOperation Registry reg add "HKCU\Control Panel\Desktop" /v HungAppTimeout /t REG_SZ /d 1000 /f
 call :Log "Gaming tweaks: scheduler priorities"
 
 echo [*] Prioritizing multimedia + game scheduler values...
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" /v NetworkThrottlingIndex /t REG_DWORD /d 4294967295 /f >nul
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" /v SystemResponsiveness /t REG_DWORD /d 10 /f >nul
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "GPU Priority" /t REG_DWORD /d 8 /f >nul
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "Priority" /t REG_DWORD /d 6 /f >nul
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "Scheduling Category" /t REG_SZ /d "High" /f >nul
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "SFIO Priority" /t REG_SZ /d "High" /f >nul
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" /v NetworkThrottlingIndex /t REG_DWORD /d 4294967295 /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" /v SystemResponsiveness /t REG_DWORD /d 10 /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "GPU Priority" /t REG_DWORD /d 8 /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "Priority" /t REG_DWORD /d 6 /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "Scheduling Category" /t REG_SZ /d "High" /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "SFIO Priority" /t REG_SZ /d "High" /f
 
 call :Log "Gaming tweaks: latency + input"
 
 echo [*] Optimizing for low latency and high throughput...
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "Latency Sensitive" /t REG_SZ /d "True" /f >nul
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "NoLazyMode" /t REG_DWORD /d 1 /f >nul
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "Latency Sensitive" /t REG_SZ /d "True" /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "NoLazyMode" /t REG_DWORD /d 1 /f
 
 echo [*] Optimizing mouse and keyboard input for gaming...
-reg add "HKCU\Control Panel\Mouse" /v MouseSpeed /t REG_SZ /d 0 /f >nul
-reg add "HKCU\Control Panel\Mouse" /v MouseThreshold1 /t REG_SZ /d 0 /f >nul
-reg add "HKCU\Control Panel\Mouse" /v MouseThreshold2 /t REG_SZ /d 0 /f >nul
-reg add "HKCU\Control Panel\Mouse" /v MouseSensitivity /t REG_SZ /d 10 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\mouclass\Parameters" /v MouseDataQueueSize /t REG_DWORD /d 20 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\kbdclass\Parameters" /v KeyboardDataQueueSize /t REG_DWORD /d 20 /f >nul
+call :RunOperation Registry reg add "HKCU\Control Panel\Mouse" /v MouseSpeed /t REG_SZ /d 0 /f
+call :RunOperation Registry reg add "HKCU\Control Panel\Mouse" /v MouseThreshold1 /t REG_SZ /d 0 /f
+call :RunOperation Registry reg add "HKCU\Control Panel\Mouse" /v MouseThreshold2 /t REG_SZ /d 0 /f
+call :RunOperation Registry reg add "HKCU\Control Panel\Mouse" /v MouseSensitivity /t REG_SZ /d 10 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\mouclass\Parameters" /v MouseDataQueueSize /t REG_DWORD /d 20 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\kbdclass\Parameters" /v KeyboardDataQueueSize /t REG_DWORD /d 20 /f
 
 echo [*] Enabling full Game Mode stack...
-reg add "HKCU\Software\Microsoft\GameBar" /v UseNexusForGameBarEnabled /t REG_DWORD /d 0 /f >nul
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\GameBar" /v UseNexusForGameBarEnabled /t REG_DWORD /d 0 /f
 
 echo [*] Optimizing system timer resolution for better frame pacing...
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\kernel" /v GlobalTimerResolutionRequests /t REG_DWORD /d 1 /f >nul
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\kernel" /v GlobalTimerResolutionRequests /t REG_DWORD /d 1 /f
 REM bcdedit changes - can cause issues on some systems, proceed with caution
 for %%B in ("useplatformclock true" "disabledynamictick yes") do (
-    bcdedit /set %%~B >nul 2>&1
+    call :RunOperation Native bcdedit /set %%~B
     if errorlevel 1 call :Log "Warning: bcdedit /set %%~B failed; leaving boot security settings unchanged"
 )
 
 echo [*] Prioritizing foreground apps (games) over background tasks...
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\PriorityControl" /v Win32PrioritySeparation /t REG_DWORD /d 38 /f >nul
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\PriorityControl" /v Win32PrioritySeparation /t REG_DWORD /d 38 /f
 call :Log "Gaming tweaks: telemetry disable"
 
-sc stop "DiagTrack" >nul 2>&1
-sc config "DiagTrack" start= disabled >nul 2>&1
+call :RunOperation Service sc stop "DiagTrack"
+call :RunOperation Service sc config "DiagTrack" start= disabled
 
-call :Log "Gaming tweaks applied"
+call :Log "Gaming changes attempted; see results"
 call :AddToSummary "Gaming performance tweaks"
 echo.
-echo %CLR_SUCCESS%[+] Gaming optimizations applied!%CLR_RESET% FPS and responsiveness improved.
+echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
 if /I "%GPU_VENDOR%"=="NVIDIA" (
     echo     %CLR_WARNING%Tip:%CLR_RESET% Open NVIDIA Control Panel ^> Low Latency Mode = Ultra
 )
@@ -483,6 +495,7 @@ if /I "%GPU_VENDOR%"=="Intel Arc" (
     echo     %CLR_WARNING%Tip:%CLR_RESET% Open Intel Graphics Command Center for game optimizations
 )
 echo     Log: %LOG_FILE%
+REM Requested operations are recorded individually, including failures.
 exit /b 0
 
 :OptimizeServices
@@ -494,10 +507,10 @@ echo ========================================================================
 echo.
 echo [*] Reducing background services, indexing, telemetry, and tips...
 for %%S in (SysMain WSearch DiagTrack dmwappushservice RetailDemo RemoteRegistry MapsBroker TrkWks) do (
-    sc stop %%S >nul 2>&1
-    sc config %%S start= disabled >nul 2>&1
+    call :RunOperation Service sc stop %%S
+    call :RunOperation Service sc config %%S start= disabled
 )
-sc config WSearch start= demand >nul 2>&1
+call :RunOperation Service sc config WSearch start= demand
 for %%T in (
     "\Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser"
     "\Microsoft\Windows\Customer Experience Improvement Program\Consolidator"
@@ -506,27 +519,28 @@ for %%T in (
     "\Microsoft\Windows\Autochk\Proxy"
     "\Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector"
 ) do (
-    schtasks /Change /TN "%%~T" /Disable >nul 2>&1
+    call :RunOperation Task schtasks /Change /TN "%%~T" /Disable
 )
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v AllowTelemetry /t REG_DWORD /d 0 /f >nul
-reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection" /v AllowTelemetry /t REG_DWORD /d 0 /f >nul
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows Search" /v AllowCortana /t REG_DWORD /d 0 /f >nul
-reg add "HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" /v CortanaConsent /t REG_DWORD /d 0 /f >nul
-reg add "HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" /v BingSearchEnabled /t REG_DWORD /d 0 /f >nul
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v SubscribedContent-338388Enabled /t REG_DWORD /d 0 /f >nul
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v SubscribedContent-338389Enabled /t REG_DWORD /d 0 /f >nul
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v SystemPaneSuggestionsEnabled /t REG_DWORD /d 0 /f >nul
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v ShowSyncProviderNotifications /t REG_DWORD /d 0 /f >nul
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v Start_IrisRecommendations /t REG_DWORD /d 0 /f >nul
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\AdvertisingInfo" /v DisabledByGroupPolicy /t REG_DWORD /d 1 /f >nul
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo" /v Enabled /t REG_DWORD /d 0 /f >nul
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\CloudContent" /v DisableSoftLanding /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\CloudContent" /v DisableWindowsSpotlightFeatures /t REG_DWORD /d 1 /f >nul
-call :Log "Service/telemetry optimizations complete"
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v AllowTelemetry /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection" /v AllowTelemetry /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows Search" /v AllowCortana /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" /v CortanaConsent /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" /v BingSearchEnabled /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v SubscribedContent-338388Enabled /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v SubscribedContent-338389Enabled /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v SystemPaneSuggestionsEnabled /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v ShowSyncProviderNotifications /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v Start_IrisRecommendations /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\AdvertisingInfo" /v DisabledByGroupPolicy /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo" /v Enabled /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\CloudContent" /v DisableSoftLanding /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\CloudContent" /v DisableWindowsSpotlightFeatures /t REG_DWORD /d 1 /f
+call :Log "Service/telemetry attempts finished; see results"
 call :AddToSummary "Services optimized"
 echo.
-echo %CLR_SUCCESS%[+] Services optimized!%CLR_RESET% Background CPU/RAM usage reduced.
+echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
 echo     Log: %LOG_FILE%
+REM Requested operations are recorded individually, including failures.
 exit /b 0
 
 :NetworkMenu
@@ -557,32 +571,33 @@ echo   %CLR_TITLE%APPLYING NETWORK OPTIMIZATIONS%CLR_RESET%
 echo ========================================================================
 echo.
 echo [*] Applying safe TCP/IP and bandwidth tweaks for gaming...
-netsh interface tcp set global autotuninglevel=highlyrestricted >nul 2>&1
-netsh interface tcp set global ecncapability=disabled >nul 2>&1
-netsh interface tcp set global rss=enabled >nul 2>&1
-netsh interface tcp set global rsc=disabled >nul 2>&1
-netsh interface tcp set global chimney=disabled >nul 2>&1
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpTimedWaitDelay /t REG_DWORD /d 30 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v MaxUserPort /t REG_DWORD /d 65534 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v Tcp1323Opts /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpNoDelay /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpAckFrequency /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v DefaultTTL /t REG_DWORD /d 64 /f >nul
+call :RunOperation Native netsh interface tcp set global autotuninglevel=highlyrestricted
+call :RunOperation Native netsh interface tcp set global ecncapability=disabled
+call :RunOperation Native netsh interface tcp set global rss=enabled
+call :RunOperation Native netsh interface tcp set global rsc=disabled
+call :RunOperation Native netsh interface tcp set global chimney=disabled
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpTimedWaitDelay /t REG_DWORD /d 30 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v MaxUserPort /t REG_DWORD /d 65534 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v Tcp1323Opts /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpNoDelay /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpAckFrequency /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v DefaultTTL /t REG_DWORD /d 64 /f
 
-sc stop DoSvc >nul 2>&1
-sc config DoSvc start= disabled >nul 2>&1
-schtasks /Change /TN "\Microsoft\Windows\Delivery Optimization\Maintenance" /Disable >nul 2>&1
-schtasks /Change /TN "\Microsoft\Windows\Delivery Optimization\Download" /Disable >nul 2>&1
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" /v DODownloadMode /t REG_DWORD /d 0 /f >nul
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" /v DOMaxUploadBandwidth /t REG_DWORD /d 0 /f >nul
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" /v DOMaxUploadPercentage /t REG_DWORD /d 0 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces" /v TcpAckFrequency /t REG_DWORD /d 1 /f >nul 2>&1
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces" /v TCPNoDelay /t REG_DWORD /d 1 /f >nul 2>&1
-call :Log "Network tweaks applied"
+call :RunOperation Service sc stop DoSvc
+call :RunOperation Service sc config DoSvc start= disabled
+call :RunOperation Task schtasks /Change /TN "\Microsoft\Windows\Delivery Optimization\Maintenance" /Disable
+call :RunOperation Task schtasks /Change /TN "\Microsoft\Windows\Delivery Optimization\Download" /Disable
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" /v DODownloadMode /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" /v DOMaxUploadBandwidth /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" /v DOMaxUploadPercentage /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces" /v TcpAckFrequency /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces" /v TCPNoDelay /t REG_DWORD /d 1 /f
+call :Log "Network changes attempted; see results"
 call :AddToSummary "Network optimized"
 echo.
-echo %CLR_SUCCESS%[+] Network tweaks applied!%CLR_RESET% Lower latency and improved throughput.
+echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
 echo     Log: %LOG_FILE%
+REM Requested operations are recorded individually, including failures.
 exit /b 0
 
 :RevertNetworkTweaks
@@ -593,28 +608,29 @@ echo   %CLR_TITLE%REVERTING NETWORK TWEAKS%CLR_RESET%
 echo ========================================================================
 echo.
 echo [*] Reverting network-related tweaks to Windows defaults...
-netsh interface tcp set global autotuninglevel=normal >nul 2>&1
-netsh interface tcp set global ecncapability=default >nul 2>&1
-netsh interface tcp set global rss=enabled >nul 2>&1
-netsh interface tcp set global rsc=default >nul 2>&1
-netsh interface tcp set global chimney=default >nul 2>&1
+call :RunOperation Native netsh interface tcp set global autotuninglevel=normal
+call :RunOperation Native netsh interface tcp set global ecncapability=default
+call :RunOperation Native netsh interface tcp set global rss=enabled
+call :RunOperation Native netsh interface tcp set global rsc=default
+call :RunOperation Native netsh interface tcp set global chimney=default
 for %%V in (TcpTimedWaitDelay MaxUserPort Tcp1323Opts TcpNoDelay TcpAckFrequency DefaultTTL) do (
-    reg delete "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v %%V /f >nul 2>&1
+    call :RunOperation Registry reg delete "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v %%V /f
 )
-sc config DoSvc start= delayed-auto >nul 2>&1
-sc start DoSvc >nul 2>&1
+call :RunOperation Service sc config DoSvc start= delayed-auto
+call :RunOperation Service sc start DoSvc
 for %%T in ("\Microsoft\Windows\Delivery Optimization\Maintenance" "\Microsoft\Windows\Delivery Optimization\Download") do (
-    schtasks /Change /TN "%%~T" /Enable >nul 2>&1
+    call :RunOperation Task schtasks /Change /TN "%%~T" /Enable
 )
 for %%V in (DODownloadMode DOMaxUploadBandwidth DOMaxUploadPercentage) do (
-    reg delete "HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" /v %%V /f >nul 2>&1
+    call :RunOperation Registry reg delete "HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" /v %%V /f
 )
-reg delete "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces" /v TcpAckFrequency /f >nul 2>&1
-reg delete "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces" /v TCPNoDelay /f >nul 2>&1
-call :Log "Network tweaks reverted"
+call :RunOperation Registry reg delete "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces" /v TcpAckFrequency /f
+call :RunOperation Registry reg delete "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces" /v TCPNoDelay /f
+call :Log "Network reset attempted; see results"
 echo.
-echo %CLR_SUCCESS%[+] Network tweaks reverted!%CLR_RESET% Restored Windows defaults.
+echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
 echo     Log: %LOG_FILE%
+REM Requested operations are recorded individually, including failures.
 exit /b 0
 
 :DisableAnimations
@@ -649,43 +665,44 @@ if "%ANIM_CHOICE%"=="1" (
     echo.
     echo [*] Applying BALANCED visual settings...
     REM Keep animations but disable extras
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarAnimations /t REG_DWORD /d 1 /f >nul
-    reg add "HKCU\Control Panel\Desktop\WindowMetrics" /v MinAnimate /t REG_SZ /d 1 /f >nul
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" /v VisualFXSetting /t REG_DWORD /d 3 /f >nul
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarAnimations /t REG_DWORD /d 1 /f
+    call :RunOperation Registry reg add "HKCU\Control Panel\Desktop\WindowMetrics" /v MinAnimate /t REG_SZ /d 1 /f
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" /v VisualFXSetting /t REG_DWORD /d 3 /f
     REM Disable non-essential extras
-    reg add "HKCU\Software\Microsoft\Windows\DWM" /v EnableAeroPeek /t REG_DWORD /d 0 /f >nul
-    reg add "HKCU\Software\Microsoft\Windows\DWM" /v AlwaysHibernateThumbnails /t REG_DWORD /d 0 /f >nul
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v ListviewAlphaSelect /t REG_DWORD /d 0 /f >nul
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v ListviewShadow /t REG_DWORD /d 0 /f >nul
-    reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v DisallowShaking /t REG_DWORD /d 1 /f >nul
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\DWM" /v EnableAeroPeek /t REG_DWORD /d 0 /f
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\DWM" /v AlwaysHibernateThumbnails /t REG_DWORD /d 0 /f
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v ListviewAlphaSelect /t REG_DWORD /d 0 /f
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v ListviewShadow /t REG_DWORD /d 0 /f
+    call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v DisallowShaking /t REG_DWORD /d 1 /f
     REM Keep transparency and smooth scrolling
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 1 /f >nul
-    call :Log "Balanced visual settings applied"
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 1 /f
+    call :Log "Balanced visual settings attempted; see results"
     call :AddToSummary "Visual effects: Balanced"
     echo.
-    echo %CLR_SUCCESS%[+] Balanced visuals applied!%CLR_RESET% Smooth Windows 11 experience preserved.
+    echo [*] Balanced visuals requested. Review the verified operation results.
 ) else (
     echo.
     echo [*] Applying MINIMAL visual settings for max FPS...
-    reg add "HKCU\Control Panel\Desktop\WindowMetrics" /v MinAnimate /t REG_SZ /d 0 /f >nul
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarAnimations /t REG_DWORD /d 0 /f >nul
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" /v VisualFXSetting /t REG_DWORD /d 3 /f >nul
-    reg add "HKCU\Control Panel\Desktop" /v UserPreferencesMask /t REG_BINARY /d 9012038010000000 /f >nul
-    reg add "HKCU\Software\Microsoft\Windows\DWM" /v EnableAeroPeek /t REG_DWORD /d 0 /f >nul
-    reg add "HKCU\Software\Microsoft\Windows\DWM" /v AlwaysHibernateThumbnails /t REG_DWORD /d 0 /f >nul
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v ListviewAlphaSelect /t REG_DWORD /d 0 /f >nul
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v ListviewShadow /t REG_DWORD /d 0 /f >nul
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarMn /t REG_DWORD /d 0 /f >nul
-    reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v DisallowShaking /t REG_DWORD /d 1 /f >nul
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarDa /t REG_DWORD /d 0 /f >nul
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 0 /f >nul
-    call :Log "Minimal animations applied"
+    call :RunOperation Registry reg add "HKCU\Control Panel\Desktop\WindowMetrics" /v MinAnimate /t REG_SZ /d 0 /f
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarAnimations /t REG_DWORD /d 0 /f
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" /v VisualFXSetting /t REG_DWORD /d 3 /f
+    call :RunOperation Registry reg add "HKCU\Control Panel\Desktop" /v UserPreferencesMask /t REG_BINARY /d 9012038010000000 /f
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\DWM" /v EnableAeroPeek /t REG_DWORD /d 0 /f
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\DWM" /v AlwaysHibernateThumbnails /t REG_DWORD /d 0 /f
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v ListviewAlphaSelect /t REG_DWORD /d 0 /f
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v ListviewShadow /t REG_DWORD /d 0 /f
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarMn /t REG_DWORD /d 0 /f
+    call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v DisallowShaking /t REG_DWORD /d 1 /f
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarDa /t REG_DWORD /d 0 /f
+    call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 0 /f
+    call :Log "Minimal visual settings attempted; see results"
     call :AddToSummary "Visual effects: Minimal"
     echo.
-    echo %CLR_SUCCESS%[+] Minimal visuals applied!%CLR_RESET% Maximum FPS mode.
+    echo [*] Minimal visuals requested. Review the verified operation results.
     echo     Restart Explorer for immediate effect: taskkill /f /im explorer.exe ^& start explorer.exe
 )
 echo     Log: %LOG_FILE%
+REM Requested operations are recorded individually, including failures.
 exit /b 0
 
 :OptimizeStartup
@@ -696,24 +713,25 @@ echo   %CLR_TITLE%OPTIMIZING STARTUP PROGRAMS%CLR_RESET%
 echo ========================================================================
 echo.
 echo [*] Reducing startup delays and disabling unnecessary startup items...
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize" /v StartupDelayInMSec /t REG_DWORD /d 0 /f >nul
-schtasks /Change /TN "\Microsoft\Windows\Application Experience\StartupAppTask" /Disable >nul 2>&1
-schtasks /Change /TN "\Microsoft\Windows\Application Experience\PcaPatchDbTask" /Disable >nul 2>&1
-schtasks /Change /TN "\Microsoft\Windows\Maps\MapsUpdateTask" /Disable >nul 2>&1
-schtasks /Change /TN "\Microsoft\Windows\Maps\MapsToastTask" /Disable >nul 2>&1
-schtasks /Change /TN "\Microsoft\Windows\CloudExperienceHost\CreateObjectTask" /Disable >nul 2>&1
-powercfg -attributes SUB_SLEEP 7bc4a2f9-d8fc-4469-b07b-33eb785aaca0 -ATTRIB_HIDE >nul 2>&1
-powercfg -setacvalueindex SCHEME_CURRENT SUB_SLEEP 7bc4a2f9-d8fc-4469-b07b-33eb785aaca0 0 >nul 2>&1
-powercfg -setdcvalueindex SCHEME_CURRENT SUB_SLEEP 7bc4a2f9-d8fc-4469-b07b-33eb785aaca0 0 >nul 2>&1
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power" /v HiberbootEnabled /t REG_DWORD /d 0 /f >nul
-Dism /Online /Disable-Feature /FeatureName:Printing-XPSServices-Features /NoRestart /Quiet >nul 2>&1
-Dism /Online /Disable-Feature /FeatureName:WorkFolders-Client /NoRestart /Quiet >nul 2>&1
-Dism /Online /Disable-Feature /FeatureName:FaxServicesClientPackage /NoRestart /Quiet >nul 2>&1
-call :Log "Startup optimized"
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize" /v StartupDelayInMSec /t REG_DWORD /d 0 /f
+call :RunOperation Task schtasks /Change /TN "\Microsoft\Windows\Application Experience\StartupAppTask" /Disable
+call :RunOperation Task schtasks /Change /TN "\Microsoft\Windows\Application Experience\PcaPatchDbTask" /Disable
+call :RunOperation Task schtasks /Change /TN "\Microsoft\Windows\Maps\MapsUpdateTask" /Disable
+call :RunOperation Task schtasks /Change /TN "\Microsoft\Windows\Maps\MapsToastTask" /Disable
+call :RunOperation Task schtasks /Change /TN "\Microsoft\Windows\CloudExperienceHost\CreateObjectTask" /Disable
+call :RunOperation Native powercfg -attributes SUB_SLEEP 7bc4a2f9-d8fc-4469-b07b-33eb785aaca0 -ATTRIB_HIDE
+call :RunOperation Native powercfg -setacvalueindex SCHEME_CURRENT SUB_SLEEP 7bc4a2f9-d8fc-4469-b07b-33eb785aaca0 0
+call :RunOperation Native powercfg -setdcvalueindex SCHEME_CURRENT SUB_SLEEP 7bc4a2f9-d8fc-4469-b07b-33eb785aaca0 0
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power" /v HiberbootEnabled /t REG_DWORD /d 0 /f
+call :RunOperation Feature Disable "Printing-XPSServices-Features"
+call :RunOperation Feature Disable "WorkFolders-Client"
+call :RunOperation Feature Disable "FaxServicesClientPackage"
+call :Log "Startup changes attempted; see results"
 call :AddToSummary "Startup optimized"
 echo.
-echo %CLR_SUCCESS%[+] Startup optimized!%CLR_RESET% Boot time and responsiveness improved.
+echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
 echo     Log: %LOG_FILE%
+REM Requested operations are recorded individually, including failures.
 exit /b 0
 
 :FreeDiskSpace
@@ -724,21 +742,22 @@ echo   %CLR_TITLE%FREEING DISK SPACE%CLR_RESET%
 echo ========================================================================
 echo.
 echo [*] Clearing temporary files and reclaiming disk space...
-powercfg /h off >nul 2>&1
-call :Log "Hibernation disabled"
+call :RunOperation Native powercfg /h off
+call :Log "Hibernation change attempted; see results"
 if "!CHASSIS_TYPE!"=="Laptop" (
-    echo     %CLR_WARNING%[NOTE] Hibernation disabled - re-enable with: powercfg /h on%CLR_RESET%
+    echo     %CLR_WARNING%[NOTE] Hibernation disable requested - re-enable with: powercfg /h on%CLR_RESET%
 )
 call :ClearTemp "%TEMP%"
 if defined LOCALAPPDATA call :ClearTemp "%LOCALAPPDATA%\Temp"
 call :ClearTemp "%SystemRoot%\Temp"
 call :ClearUpdateCache
-"%SystemRoot%\System32\dism.exe" /Online /Cleanup-Image /StartComponentCleanup >> "%LOG_FILE%" 2>&1
-call :Log "Disk cleanup complete"
+call :RunOperation Native dism /Online /Cleanup-Image /StartComponentCleanup
+call :Log "Disk cleanup attempts finished; see results"
 call :AddToSummary "Disk space freed"
 echo.
-echo %CLR_SUCCESS%[+] Disk cleanup complete!%CLR_RESET% Temporary files removed.
+echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
 echo     Log: %LOG_FILE%
+REM Requested operations are recorded individually, including failures.
 exit /b 0
 
 :OptimizeMemory
@@ -751,12 +770,13 @@ if defined RAM_GB (
         call :Log "Low RAM warning: %RAM_GB%GB detected - DisablePagingExecutive may cause issues"
     )
 )
-"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "Enable-MMAgent -MemoryCompression" >nul 2>&1
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" /v DisablePagingExecutive /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" /v LargeSystemCache /t REG_DWORD /d 0 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" /v ClearPageFileAtShutdown /t REG_DWORD /d 0 /f >nul
-call :Log "Memory optimizations applied"
+call :RunOperation Memory MemoryCompression 1
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" /v DisablePagingExecutive /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" /v LargeSystemCache /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" /v ClearPageFileAtShutdown /t REG_DWORD /d 0 /f
+call :Log "Memory changes attempted; see results"
 call :AddToSummary "Memory optimizations applied"
+REM Requested operations are recorded individually, including failures.
 exit /b 0
 
 :ClearTemp
@@ -780,7 +800,7 @@ REM Accept configured temp paths but reject roots, profile/system folders and an
 REM Skip reparse points and never recursively follow a junction or symlink.
 REM Update-cache cleanup waits for both services to stop and restores running services.
 "%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command ^
- "$ErrorActionPreference='Stop'; $restart=@(); try { try {" ^
+ "$ErrorActionPreference='Stop'; $restart=@(); $script:cleanupFailures=0; try { try {" ^
  "function Full-Path([string]$path){if(-not [IO.Path]::IsPathRooted($path)){throw 'Cleanup path must be absolute'}; [IO.Path]::GetFullPath($path).TrimEnd('\')};" ^
  "$target=Full-Path $env:OPTIMIZER_CLEANUP_TARGET; $cache=Full-Path (Join-Path $env:SystemRoot 'SoftwareDistribution\Download');" ^
  "$allowed=@(); if($env:OPTIMIZER_CLEANUP_MODE -eq 'update'){$allowed=@($cache)} elseif($env:OPTIMIZER_CLEANUP_MODE -eq 'temp'){if($env:LOCALAPPDATA){$allowed += Full-Path (Join-Path $env:LOCALAPPDATA 'Temp')}; $allowed += Full-Path (Join-Path $env:SystemRoot 'Temp'); if($env:TEMP){$allowed += Full-Path $env:TEMP}} else {throw 'Unknown cleanup mode'};" ^
@@ -791,10 +811,14 @@ REM Update-cache cleanup waits for both services to stop and restores running se
  "if(-not (Test-Path -LiteralPath $target)){exit 0}; $dir=Get-Item -LiteralPath $target -Force; if(-not $dir.PSIsContainer){throw 'Target is not a directory'};" ^
  "for($ancestor=$dir; $null -ne $ancestor; $ancestor=$ancestor.Parent){if($ancestor.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Refusing reparse point in cleanup path'}};" ^
  "if($env:OPTIMIZER_CLEANUP_MODE -eq 'update'){$services=@(Get-Service -Name wuauserv,bits); if($services.Count -ne 2){throw 'Update services not found'}; foreach($svc in $services){if($svc.Status -notin @('Running','Stopped')){throw 'Update service is changing state; retry later'}}; $restart=@($services | Where-Object {$_.Status -eq 'Running'}); foreach($svc in $restart){Stop-Service -InputObject $svc -NoWait -ErrorAction Stop; $svc.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(20))}; foreach($svc in $services){$svc.Refresh(); if($svc.Status -ne 'Stopped'){throw 'Update service has not stopped'}}};" ^
- "function Clear-TempDirectory([string]$path){foreach($item in Get-ChildItem -LiteralPath $path -Force){if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){continue}; if($item.PSIsContainer){Clear-TempDirectory $item.FullName; if(@(Get-ChildItem -LiteralPath $item.FullName -Force).Count -ne 0){continue}}; try {Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop} catch {Write-Warning $_}}}; Clear-TempDirectory $target" ^
- "} finally {$restoreFailed=$false; foreach($svc in $restart){try {Start-Service -InputObject $svc -ErrorAction Stop} catch {$restoreFailed=$true; Write-Warning $_}}; if($restoreFailed){throw 'Could not restore an update service; inspect the log'}}; exit 0 } catch {Write-Warning $_; exit 1}" >> "%LOG_FILE%" 2>&1
+ "function Clear-TempDirectory([string]$path){foreach($item in Get-ChildItem -LiteralPath $path -Force){if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){continue}; if($item.PSIsContainer){Clear-TempDirectory $item.FullName; if(@(Get-ChildItem -LiteralPath $item.FullName -Force).Count -ne 0){continue}}; try {Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop} catch {$script:cleanupFailures++; Write-Warning $_}}}; Clear-TempDirectory $target" ^
+ "} finally {$restoreFailed=$false; foreach($svc in $restart){try {Start-Service -InputObject $svc -ErrorAction Stop} catch {$restoreFailed=$true; Write-Warning $_}}; if($restoreFailed){throw 'Could not restore an update service; inspect the log'}}; if($script:cleanupFailures -gt 0){exit 2}; exit 0 } catch {Write-Warning $_; exit 1}" >> "%LOG_FILE%" 2>&1
 set "CLEANUP_RESULT=%errorlevel%"
-if not "%CLEANUP_RESULT%"=="0" call :Log "Cleanup skipped or incomplete; see log"
+if "%CLEANUP_RESULT%"=="0" (
+    call :RecordOperation Applied "Cleanup %OPTIMIZER_CLEANUP_TARGET%" "Traversal completed; skipped reparse points. See log for details." "1"
+) else (
+    call :RecordOperation Failed "Cleanup %OPTIMIZER_CLEANUP_TARGET%" "Partial or failed cleanup; some files may have been removed. See log."
+)
 exit /b %CLEANUP_RESULT%
 
 :OptimizePageFile
@@ -807,24 +831,25 @@ if not defined RAM_GB (
 )
 if %RAM_GB% GEQ 16 (
     echo     System RAM: %RAM_GB%GB - Setting managed page file
-    "%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "$cs = Get-CimInstance Win32_ComputerSystem; $cs | Set-CimInstance -Property @{AutomaticManagedPagefile=$true}" >nul 2>&1
+    call :RunOperation Pagefile Auto
     if errorlevel 1 call :Log "Warning: Failed enabling automatic managed page file"
-    call :Log "Page file: Managed (16GB+ RAM detected)"
+    call :Log "Requested managed page file; see verified operation result"
     call :AddToSummary "Page file optimized for %RAM_GB%GB RAM"
 ) else if %RAM_GB% GEQ 8 (
     echo     System RAM: %RAM_GB%GB - Setting fixed page file ^(4GB^)
     REM Win32_PageFileSetting may not exist when automatic management is enabled; set via CIM + registry for reliability.
-    "%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "$cs = Get-CimInstance Win32_ComputerSystem; $cs | Set-CimInstance -Property @{AutomaticManagedPagefile=$false}; Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' -Name PagingFiles -Value @(($env:SystemDrive + '\pagefile.sys 4096 4096'))" >nul 2>&1
+    call :RunOperation Pagefile Fixed4GB
     if errorlevel 1 call :Log "Warning: Failed setting fixed page file size"
-    call :Log "Page file: Fixed 4GB (8-15GB RAM detected)"
+    call :Log "Requested fixed 4GB page file; see verified operation result"
     call :AddToSummary "Page file fixed at 4GB"
 ) else (
     echo     System RAM: %RAM_GB%GB - Keeping system-managed page file
     echo     %CLR_WARNING%[!] Low RAM detected - consider adding more RAM for gaming%CLR_RESET%
-    "%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "$cs = Get-CimInstance Win32_ComputerSystem; $cs | Set-CimInstance -Property @{AutomaticManagedPagefile=$true}" >nul 2>&1
+    call :RunOperation Pagefile Auto
     if errorlevel 1 call :Log "Warning: Failed enabling automatic managed page file (low RAM path)"
-    call :Log "Page file: System-managed (less than 8GB RAM) - LOW RAM WARNING"
+    call :Log "Requested managed page file for low RAM; see verified operation result"
 )
+REM Requested operations are recorded individually, including failures.
 exit /b 0
 
 :DisableCoreParking
@@ -836,10 +861,11 @@ if not defined SCHEME_GUID (
     call :Log "Warning: Could not get active power scheme GUID, using default"
     set "SCHEME_GUID=SCHEME_CURRENT"
 )
-powercfg -setacvalueindex %SCHEME_GUID% SUB_PROCESSOR CPMINCORES 100 >nul 2>&1
-powercfg -setactive %SCHEME_GUID% >nul 2>&1
-call :Log "Core parking disabled"
+call :RunOperation Native powercfg -setacvalueindex %SCHEME_GUID% SUB_PROCESSOR CPMINCORES 100
+call :RunOperation Native powercfg -setactive %SCHEME_GUID%
+call :Log "Core parking change attempted; see results"
 call :AddToSummary "CPU core parking disabled"
+REM Requested operations are recorded individually, including failures.
 exit /b 0
 
 :OptimizeStorageByType
@@ -847,25 +873,26 @@ call :Log "Optimizing storage by type: %STORAGE_TYPE%"
 echo [*] Applying storage-specific optimizations...
 if /I "%STORAGE_TYPE%"=="SSD" (
     echo     Storage: SSD detected - Optimizing for solid state
-    reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v NtfsDisableLastAccessUpdate /t REG_DWORD /d 1 /f >nul
-    fsutil behavior set DisableDeleteNotify 0 >nul 2>&1
+    call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v NtfsDisableLastAccessUpdate /t REG_DWORD /d 1 /f
+    call :RunOperation Native fsutil behavior set DisableDeleteNotify 0
     if %RAM_GB% GEQ 8 (
-        "%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "Disable-MMAgent -PageCombining" >nul 2>&1
-        call :Log "SSD: TRIM enabled, maintenance schedule preserved, page combining off"
+        call :RunOperation Memory PageCombining 0
+        call :Log "SSD operations attempted; see results for TRIM and page combining"
     ) else (
-        call :Log "SSD: TRIM enabled, maintenance schedule preserved"
+        call :Log "SSD operations attempted; see results for TRIM"
     )
     call :AddToSummary "SSD optimizations applied"
 ) else if /I "%STORAGE_TYPE%"=="HDD" (
     echo     Storage: HDD detected - Enabling prefetch
-    reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters" /v EnablePrefetcher /t REG_DWORD /d 3 /f >nul
-    reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters" /v EnableSuperfetch /t REG_DWORD /d 3 /f >nul
+    call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters" /v EnablePrefetcher /t REG_DWORD /d 3 /f
+    call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters" /v EnableSuperfetch /t REG_DWORD /d 3 /f
     call :Log "HDD: Prefetch enabled, maintenance schedule preserved"
     call :AddToSummary "HDD optimizations applied"
 ) else (
     echo     Storage: Unknown type - Applying safe defaults
     call :Log "Storage type unknown, skipping type-specific optimizations"
 )
+REM Requested operations are recorded individually, including failures.
 exit /b 0
 
 :AdvancedGPUStorage
@@ -886,46 +913,47 @@ if not "%AUTO_ADVANCED_CONFIRM%"=="1" (
     )
 )
 echo [*] Applying GPU optimizations (NVIDIA/AMD agnostic)...
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultD3TransitionLatencyActivelyUsed /t REG_DWORD /d 0 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultD3TransitionLatencyIdleLongTime /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultD3TransitionLatencyIdleMonitorOff /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultD3TransitionLatencyIdleNoContext /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultD3TransitionLatencyIdleShortTime /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultD3TransitionLatencyIdleVeryLongTime /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultLatencyToleranceIdle0 /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultLatencyToleranceIdle1 /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultLatencyToleranceMemory /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultLatencyToleranceNoContext /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultLatencyToleranceNoContextMonitorOff /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultLatencyToleranceOther /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultLatencyToleranceTimerPeriod /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultMemoryRefreshLatencyToleranceActivelyUsed /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultMemoryRefreshLatencyToleranceMonitorOff /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultMemoryRefreshLatencyToleranceNoContext /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v Latency /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v MaxIAverageGraphicsLatencyInOneBucket /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v MiracastPerfTrackGraphicsLatency /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v MonitorLatencyTolerance /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v MonitorRefreshLatencyTolerance /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v TransitionLatency /t REG_DWORD /d 1 /f >nul
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultD3TransitionLatencyActivelyUsed /t REG_DWORD /d 0 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultD3TransitionLatencyIdleLongTime /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultD3TransitionLatencyIdleMonitorOff /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultD3TransitionLatencyIdleNoContext /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultD3TransitionLatencyIdleShortTime /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultD3TransitionLatencyIdleVeryLongTime /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultLatencyToleranceIdle0 /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultLatencyToleranceIdle1 /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultLatencyToleranceMemory /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultLatencyToleranceNoContext /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultLatencyToleranceNoContextMonitorOff /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultLatencyToleranceOther /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultLatencyToleranceTimerPeriod /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultMemoryRefreshLatencyToleranceActivelyUsed /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultMemoryRefreshLatencyToleranceMonitorOff /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v DefaultMemoryRefreshLatencyToleranceNoContext /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v Latency /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v MaxIAverageGraphicsLatencyInOneBucket /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v MiracastPerfTrackGraphicsLatency /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v MonitorLatencyTolerance /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v MonitorRefreshLatencyTolerance /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Power" /v TransitionLatency /t REG_DWORD /d 1 /f
 
 echo [*] Optimizing storage for SSDs and gaming drives...
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v NtfsDisableLastAccessUpdate /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v NtfsDisable8dot3NameCreation /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v DontVerifyRandomDrivers /t REG_DWORD /d 1 /f >nul
-fsutil behavior set DisableDeleteNotify 0 >nul 2>&1
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v NtfsDisableLastAccessUpdate /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v NtfsDisable8dot3NameCreation /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v DontVerifyRandomDrivers /t REG_DWORD /d 1 /f
+call :RunOperation Native fsutil behavior set DisableDeleteNotify 0
 
 echo [*] Optimizing process priorities...
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\DisplayPostProcessing" /v "GPU Priority" /t REG_DWORD /d 8 /f >nul
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\DisplayPostProcessing" /v "Priority" /t REG_DWORD /d 8 /f >nul
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\DisplayPostProcessing" /v "Scheduling Category" /t REG_SZ /d "High" /f >nul
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\DisplayPostProcessing" /v "GPU Priority" /t REG_DWORD /d 8 /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\DisplayPostProcessing" /v "Priority" /t REG_DWORD /d 8 /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\DisplayPostProcessing" /v "Scheduling Category" /t REG_SZ /d "High" /f
 
-call :Log "GPU and storage optimizations applied"
+call :Log "GPU/storage changes attempted; see results"
 echo.
-echo %CLR_SUCCESS%[+] GPU and storage optimized!%CLR_RESET% Reduced GPU latency and improved storage.
+echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
 echo     %CLR_WARNING%Note:%CLR_RESET% For NVIDIA GPUs, also set Low Latency Mode in NVIDIA Control Panel.
 echo     %CLR_WARNING%Note:%CLR_RESET% For AMD GPUs, enable Anti-Lag in AMD Software.
 echo     Log: %LOG_FILE%
+REM Requested operations are recorded individually, including failures.
 exit /b 0
 
 :OptimizeAudio
@@ -936,23 +964,24 @@ echo   %CLR_TITLE%AUDIO LATENCY REDUCTION%CLR_RESET%
 echo ========================================================================
 echo.
 echo [*] Reducing audio latency for gaming and streaming...
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio" /v "GPU Priority" /t REG_DWORD /d 8 /f >nul
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio" /v "Priority" /t REG_DWORD /d 6 /f >nul
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio" /v "Scheduling Category" /t REG_SZ /d "High" /f >nul
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio" /v "SFIO Priority" /t REG_SZ /d "High" /f >nul
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio" /v "GPU Priority" /t REG_DWORD /d 8 /f >nul
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio" /v "Priority" /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio" /v "Scheduling Category" /t REG_SZ /d "High" /f >nul
-reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio" /v "SFIO Priority" /t REG_SZ /d "High" /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\AudioSrv" /v DependOnService /t REG_MULTI_SZ /d "AudioEndpointBuilder\0RpcSs" /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\Audiosrv" /v Start /t REG_DWORD /d 2 /f >nul
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio" /v "GPU Priority" /t REG_DWORD /d 8 /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio" /v "Priority" /t REG_DWORD /d 6 /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio" /v "Scheduling Category" /t REG_SZ /d "High" /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Audio" /v "SFIO Priority" /t REG_SZ /d "High" /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio" /v "GPU Priority" /t REG_DWORD /d 8 /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio" /v "Priority" /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio" /v "Scheduling Category" /t REG_SZ /d "High" /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio" /v "SFIO Priority" /t REG_SZ /d "High" /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\AudioSrv" /v DependOnService /t REG_MULTI_SZ /d "AudioEndpointBuilder\0RpcSs" /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\Audiosrv" /v Start /t REG_DWORD /d 2 /f
 
-call :Log "Audio latency optimizations applied"
+call :Log "Audio changes attempted; see results"
 call :AddToSummary "Audio latency optimized"
 echo.
-echo %CLR_SUCCESS%[+] Audio latency reduced!%CLR_RESET% Lower audio buffer delay.
+echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
 echo     %CLR_WARNING%Tip:%CLR_RESET% In Sound settings, enable Exclusive Mode for gaming headset.
 echo     Log: %LOG_FILE%
+REM Requested operations are recorded individually, including failures.
 exit /b 0
 
 :DisableXboxServices
@@ -979,23 +1008,24 @@ if /I not "!confirm!"=="YES" (
 )
 echo.
 echo [*] Disabling Xbox-related services...
-sc stop "XblAuthManager" >nul 2>&1
-sc config "XblAuthManager" start= disabled >nul 2>&1
-sc stop "XblGameSave" >nul 2>&1
-sc config "XblGameSave" start= disabled >nul 2>&1
-sc stop "XboxGipSvc" >nul 2>&1
-sc config "XboxGipSvc" start= disabled >nul 2>&1
-sc stop "XboxNetApiSvc" >nul 2>&1
-sc config "XboxNetApiSvc" start= disabled >nul 2>&1
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\xbgm" /v Start /t REG_DWORD /d 4 /f >nul 2>&1
+call :RunOperation Service sc stop "XblAuthManager"
+call :RunOperation Service sc config "XblAuthManager" start= disabled
+call :RunOperation Service sc stop "XblGameSave"
+call :RunOperation Service sc config "XblGameSave" start= disabled
+call :RunOperation Service sc stop "XboxGipSvc"
+call :RunOperation Service sc config "XboxGipSvc" start= disabled
+call :RunOperation Service sc stop "XboxNetApiSvc"
+call :RunOperation Service sc config "XboxNetApiSvc" start= disabled
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\xbgm" /v Start /t REG_DWORD /d 4 /f
 
-call :Log "Xbox services disabled"
+call :Log "Xbox service changes attempted; see results"
 echo.
-echo %CLR_SUCCESS%[+] Xbox services disabled.%CLR_RESET%
+echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
 echo     To re-enable, use the UNDO option or run:
 echo     sc config XblAuthManager start= demand
 echo     sc config XblGameSave start= demand
 echo     Log: %LOG_FILE%
+REM Requested operations are recorded individually, including failures.
 exit /b 0
 
 :ShowHelp
@@ -1145,60 +1175,58 @@ echo ========================================================================
 echo.
 echo [*] Attempting to revert services, registry settings, and network changes...
 for %%S in (TabletInputService TextInputManagementService TouchInput WTabletServiceCon WTabletServicePen PenService TabletInputHost SysMain WSearch DiagTrack dmwappushservice RetailDemo MapsBroker TrkWks DoSvc XblAuthManager XblGameSave XboxGipSvc XboxNetApiSvc) do (
-    sc config %%S start= demand >nul 2>&1
-    sc start %%S >nul 2>&1
+    call :RunOperation Service sc config %%S start= demand
+    call :RunOperation Service sc start %%S
 )
 if exist "%LOG_DIR%\mouse_settings_backup.reg" (
-    reg import "%LOG_DIR%\mouse_settings_backup.reg" >nul 2>&1
+    call :RunOperation Native reg import "%LOG_DIR%\mouse_settings_backup.reg"
     if not errorlevel 1 (
         set "MOUSE_RESTORED=1"
-        call :Log "Mouse settings restored from backup"
+        call :Log "Mouse settings import command completed; see operation results"
     ) else (
         call :Log "Mouse settings import failed"
     )
 )
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v AllowTelemetry /t REG_DWORD /d 3 /f >nul
-reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection" /v AllowTelemetry /t REG_DWORD /d 3 /f >nul
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows Search" /v AllowCortana /t REG_DWORD /d 1 /f >nul
-reg add "HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" /v CortanaConsent /t REG_DWORD /d 1 /f >nul
-reg add "HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" /v BingSearchEnabled /t REG_DWORD /d 1 /f >nul
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 1 /f >nul
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" /v VisualFXSetting /t REG_DWORD /d 0 /f >nul
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v AllowTelemetry /t REG_DWORD /d 3 /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection" /v AllowTelemetry /t REG_DWORD /d 3 /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows Search" /v AllowCortana /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" /v CortanaConsent /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" /v BingSearchEnabled /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" /v VisualFXSetting /t REG_DWORD /d 0 /f
 for %%K in (EnableAutocorrection EnableTextPrediction EnableSpellchecking) do (
-    reg delete "HKCU\Software\Microsoft\TabletTip\1.7" /v %%K /f >nul 2>&1
+    call :RunOperation Registry reg delete "HKCU\Software\Microsoft\TabletTip\1.7" /v %%K /f
 )
-reg add "HKCU\Software\Microsoft\GameBar" /v AllowAutoGameMode /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\GameDVR" /v AllowGameDVR /t REG_DWORD /d 1 /f >nul
-reg add "HKLM\SOFTWARE\Microsoft\PolicyManager\default\ApplicationManagement\AllowGameDVR" /v value /t REG_DWORD /d 1 /f >nul
-reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v AppCaptureEnabled /f >nul 2>&1
-reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v GameDVR_Enabled /f >nul 2>&1
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\PriorityControl" /v Win32PrioritySeparation /t REG_DWORD /d 2 /f >nul
-bcdedit /deletevalue useplatformclock >nul 2>&1
-bcdedit /deletevalue disabledynamictick >nul 2>&1
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\GameBar" /v AllowAutoGameMode /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\GameDVR" /v AllowGameDVR /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKLM\SOFTWARE\Microsoft\PolicyManager\default\ApplicationManagement\AllowGameDVR" /v value /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v AppCaptureEnabled /f
+call :RunOperation Registry reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v GameDVR_Enabled /f
+call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\PriorityControl" /v Win32PrioritySeparation /t REG_DWORD /d 2 /f
+call :RunOperation Native bcdedit /deletevalue useplatformclock
+call :RunOperation Native bcdedit /deletevalue disabledynamictick
 call :RevertNetworkTweaks
-"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "Enable-WindowsOptionalFeature -Online -FeatureName 'TabletPC-OC' -NoRestart -ErrorAction SilentlyContinue" >> "%LOG_FILE%" 2>&1
-"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "Enable-WindowsOptionalFeature -Online -FeatureName 'InkAndHandwritingServices' -NoRestart -ErrorAction SilentlyContinue" >> "%LOG_FILE%" 2>&1
-reg add "HKCU\Control Panel\Desktop\WindowMetrics" /v MinAnimate /t REG_SZ /d 1 /f >nul
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarAnimations /t REG_DWORD /d 1 /f >nul
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" /v VisualFXSetting /t REG_DWORD /d 0 /f >nul
+call :RunOperation Feature Enable "TabletPC-OC"
+call :RunOperation Feature Enable "InkAndHandwritingServices"
+call :RunOperation Registry reg add "HKCU\Control Panel\Desktop\WindowMetrics" /v MinAnimate /t REG_SZ /d 1 /f
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarAnimations /t REG_DWORD /d 1 /f
+call :RunOperation Registry reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" /v VisualFXSetting /t REG_DWORD /d 0 /f
 if not defined MOUSE_RESTORED (
-    reg add "HKCU\Control Panel\Mouse" /v MouseSpeed /t REG_SZ /d 1 /f >nul
-    reg add "HKCU\Control Panel\Mouse" /v MouseThreshold1 /t REG_SZ /d 6 /f >nul
-    reg add "HKCU\Control Panel\Mouse" /v MouseThreshold2 /t REG_SZ /d 10 /f >nul
+    call :RunOperation Registry reg add "HKCU\Control Panel\Mouse" /v MouseSpeed /t REG_SZ /d 1 /f
+    call :RunOperation Registry reg add "HKCU\Control Panel\Mouse" /v MouseThreshold1 /t REG_SZ /d 6 /f
+    call :RunOperation Registry reg add "HKCU\Control Panel\Mouse" /v MouseThreshold2 /t REG_SZ /d 10 /f
 )
 call :Log "Undo routine completed"
 echo.
 echo [*] Partial rollback attempted. Check the log; this is not a complete restore.
 echo     Check %LOG_FILE% for details. %CLR_WARNING%Restart recommended.%CLR_RESET%
+REM Requested operations are recorded individually, including failures.
 exit /b 0
 
 :RemoveApp
-set "PKG=%~1"
-if not defined PKG exit /b 0
-call :Log "Removing %PKG%"
-"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "Get-AppxPackage -AllUsers -Name %PKG% | Remove-AppxPackage -ErrorAction SilentlyContinue | Out-Null" >> "%LOG_FILE%" 2>&1
-"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -eq '%PKG%' } | Remove-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue | Out-Null" >> "%LOG_FILE%" 2>&1
-exit /b 0
+if "%~1"=="" exit /b 0
+call :RunOperation Appx "%~1"
+exit /b %errorlevel%
 
 :DetectOS
 set "OS_CAPTION=Windows"
@@ -1280,10 +1308,10 @@ for %%S in (VSS swprv) do (
         call :Log "Shadow copy service %%S missing or inaccessible"
         set "ENSURE_SHADOW_ERROR=1"
     ) else (
-        sc config %%S start= demand >nul 2>&1
+        call :RunOperation Service sc config %%S start= demand
         if errorlevel 1 set "ENSURE_SHADOW_ERROR=1"
         REM Start-Service also succeeds when the service is already running.
-        "%POWERSHELL%" -NoProfile -Command "try { Start-Service -Name '%%S' -ErrorAction Stop; exit 0 } catch { exit 1 }" >nul 2>&1
+        call :RunOperation Service sc start %%S
         if errorlevel 1 set "ENSURE_SHADOW_ERROR=1"
     )
 )
@@ -1326,6 +1354,7 @@ if defined CLR_TITLE (
 exit /b 0
 
 :PauseReturn
+if defined OPTIMIZER_RESULTS if not defined RESULT_SUMMARY_SHOWN call :ShowChangesSummary
 echo.
 pause
 exit /b 0
@@ -1492,16 +1521,16 @@ set "BACKUP_FILE=%LOG_DIR%\registry_backup_%STAMP%.txt"
     echo This is a manifest, not a full registry backup or an importable REG file.
     echo.
 ) > "%BACKUP_FILE%"
-reg export "HKCU\Control Panel\Mouse" "%LOG_DIR%\backup_mouse_%STAMP%.reg" /y >nul 2>&1
-reg export "HKCU\Software\Microsoft\GameBar" "%LOG_DIR%\backup_gamebar_%STAMP%.reg" /y >nul 2>&1
-reg export "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" "%LOG_DIR%\backup_gamedvr_%STAMP%.reg" /y >nul 2>&1
-reg export "HKCU\System\GameConfigStore" "%LOG_DIR%\backup_gameconfig_%STAMP%.reg" /y >nul 2>&1
-reg export "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" "%LOG_DIR%\backup_multimedia_%STAMP%.reg" /y >nul 2>&1
-reg export "HKLM\SYSTEM\CurrentControlSet\Control\PriorityControl" "%LOG_DIR%\backup_priority_%STAMP%.reg" /y >nul 2>&1
-reg export "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" "%LOG_DIR%\backup_visualfx_%STAMP%.reg" /y >nul 2>&1
-reg export "HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection" "%LOG_DIR%\backup_telemetry_%STAMP%.reg" /y >nul 2>&1
-call :Log "Registry backup complete: %LOG_DIR%\backup_*_%STAMP%.reg"
-echo %CLR_SUCCESS%[+] Registry backed up to logs folder%CLR_RESET%
+call :RunOperation Native reg export "HKCU\Control Panel\Mouse" "%LOG_DIR%\backup_mouse_%STAMP%.reg" /y
+call :RunOperation Native reg export "HKCU\Software\Microsoft\GameBar" "%LOG_DIR%\backup_gamebar_%STAMP%.reg" /y
+call :RunOperation Native reg export "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" "%LOG_DIR%\backup_gamedvr_%STAMP%.reg" /y
+call :RunOperation Native reg export "HKCU\System\GameConfigStore" "%LOG_DIR%\backup_gameconfig_%STAMP%.reg" /y
+call :RunOperation Native reg export "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" "%LOG_DIR%\backup_multimedia_%STAMP%.reg" /y
+call :RunOperation Native reg export "HKLM\SYSTEM\CurrentControlSet\Control\PriorityControl" "%LOG_DIR%\backup_priority_%STAMP%.reg" /y
+call :RunOperation Native reg export "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" "%LOG_DIR%\backup_visualfx_%STAMP%.reg" /y
+call :RunOperation Native reg export "HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection" "%LOG_DIR%\backup_telemetry_%STAMP%.reg" /y
+call :Log "Registry backup attempts finished: %LOG_DIR%\backup_*_%STAMP%.reg"
+echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
 exit /b 0
 
 :AddToSummary
@@ -1514,37 +1543,20 @@ if not defined CHANGES_SUMMARY (
 exit /b 0
 
 :ShowChangesSummary
-if not defined CHANGES_SUMMARY (
-    echo.
-    echo [*] No changes were applied in this session.
-    exit /b 0
-)
-echo.
-echo ========================================================================
-echo   %CLR_TITLE%CHANGES APPLIED THIS SESSION%CLR_RESET%
-echo ========================================================================
-echo.
-for %%I in (%CHANGES_SUMMARY:|= %) do (
-    echo   %CLR_SUCCESS%[+]%CLR_RESET% %%I
-)
-echo.
-echo ========================================================================
-echo   %CLR_WARNING%IMPORTANT:%CLR_RESET% Restart your PC for all changes to take effect
-echo   Backup location: %LOG_DIR%
-echo   Restore options: [U] Undo or System Restore
-echo ========================================================================
-call :Log "Changes summary displayed to user"
-exit /b 0
+set "RESULT_SUMMARY_SHOWN=1"
+"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -File "%OPERATIONS_SCRIPT%" -Mode Summary
+exit /b %errorlevel%
 
 :VerifyOptimizations
 call :Log "Running verification check"
 cls
 echo.
 echo ========================================================================
-echo   %CLR_TITLE%OPTIMIZATION VERIFICATION%CLR_RESET%
+echo   %CLR_TITLE%LIMITED CONFIGURATION CHECKS%CLR_RESET%
 echo ========================================================================
 echo.
-echo   Checking current system state...
+echo   These legacy checks cover only selected registry and service values.
+echo   Use the operation results for failures, unsupported settings and restart requirements.
 echo.
 set "VERIFY_PASS=0"
 set "VERIFY_FAIL=0"
@@ -1578,7 +1590,7 @@ echo.
 echo   %CLR_SUBTITLE%GPU Scheduling:%CLR_RESET%
 reg query "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" /v HwSchMode 2>nul | findstr "0x2" >nul
 if not errorlevel 1 (
-    echo     %CLR_SUCCESS%[PASS]%CLR_RESET% Hardware-accelerated GPU scheduling enabled
+    echo     %CLR_SUCCESS%[PASS]%CLR_RESET% GPU scheduling registry preference is enabled
     set /a VERIFY_PASS+=1
 ) else (
     echo     %CLR_WARNING%[WARN]%CLR_RESET% GPU scheduling not enabled
@@ -1651,12 +1663,12 @@ if "%COREPARK_OK%"=="1" (
 
 echo.
 echo ========================================================================
-echo   %CLR_TITLE%VERIFICATION SUMMARY%CLR_RESET%
+echo   %CLR_TITLE%LIMITED CHECK SUMMARY - NOT A PERFORMANCE SCORE%CLR_RESET%
 echo ========================================================================
 echo.
 set /a VERIFY_TOTAL=VERIFY_PASS+VERIFY_FAIL
 set /a VERIFY_PCT=(VERIFY_PASS*100)/VERIFY_TOTAL
-echo   Checks Passed: %CLR_SUCCESS%[%VERIFY_PASS%/%VERIFY_TOTAL%]%CLR_RESET% (%VERIFY_PCT%%%)
+echo   Selected Checks Matched: %CLR_SUCCESS%[%VERIFY_PASS%/%VERIFY_TOTAL%]%CLR_RESET% (%VERIFY_PCT%%%)
 if %VERIFY_FAIL% GTR 0 (
     echo   Checks Failed: %CLR_WARNING%[%VERIFY_FAIL%/%VERIFY_TOTAL%]%CLR_RESET%
     echo.
@@ -1667,6 +1679,21 @@ echo ========================================================================
 call :Log "Verification: %VERIFY_PASS% passed, %VERIFY_FAIL% failed"
 exit /b 0
 
+:RunOperation
+set "RESULT_SUMMARY_SHOWN="
+set "OPTIMIZER_OPERATION=%*"
+"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -File "%OPERATIONS_SCRIPT%"
+exit /b %errorlevel%
+
+:RecordOperation
+set "RESULT_SUMMARY_SHOWN="
+set "OPTIMIZER_STATUS=%~1"
+set "OPTIMIZER_LABEL=%~2"
+set "OPTIMIZER_DETAIL=%~3"
+set "OPTIMIZER_VERIFIED=%~4"
+"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -File "%OPERATIONS_SCRIPT%" -Mode Record
+exit /b %errorlevel%
+
 :Log
 set "MESSAGE=%~1"
 echo %DATE% %TIME% - !MESSAGE!
@@ -1676,7 +1703,7 @@ exit /b 0
 :End
 call :Log "User exited script"
 echo.
-echo All tasks completed. Review %LOG_FILE% for a full history.
+echo Review %LOG_FILE% and the operation journal for confirmed results.
 popd >nul 2>&1
 endlocal
 exit /b 0

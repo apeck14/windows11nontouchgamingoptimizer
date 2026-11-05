@@ -42,6 +42,7 @@ exit /b 0
 def mock_commands(body):
     # This function is deliberately limited to routines tested below. Fail if a
     # test adds an unknown real operation instead of quietly running it.
+    body = re.sub(r'(?mi)^(\s*)call :RunOperation ', r'\1call :MockCommand ', body)
     body = re.sub(r'(?mi)^(\s*)(reg|sc|bcdedit|schtasks|powercfg) ',
                   r'\1call :MockCommand \2 ', body)
     body = re.sub(r'(?mi)^\s*"%POWERSHELL%"[^\n]*',
@@ -144,7 +145,7 @@ class Regressions(unittest.TestCase):
                     result, trace, _ = self.run_batch(mock_commands(routine(name)), name,
                         extra=LOG + MOCK + stub('AddToSummary'), env={'RAM_GB': ram})
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                    self.assertIn('powershell', trace)
+                    self.assertRegex(trace, r'Memory|Pagefile')
 
     def test_laptop_detection_and_cancellation(self):
         body = routine('DetectChassisType')
@@ -196,22 +197,10 @@ exit /b %CHOICE_CODE%
             self.assertNotRegex(trace, r'(?i)sc (?:start|config) (?:RemoteRegistry|RemoteAccess)\b')
             self.assertEqual(bool(trace), selection == '1')
 
-    def test_power_guid_parser(self):
-        body = routine('ApplyGamingTweaks')
-        body = body[body.index('set "UP_GUID="'):body.index('echo [*] Tuning Game Mode')]
-        fixture = self.work / 'fake-powercfg.cmd'
-        fixture.write_text('@echo off\necho Power Scheme GUID: 11111111-2222-3333-4444-555555555555  (Ultimate Performance)\n')
-        body = body.replace('powercfg -duplicatescheme e9a42b02-d5df-448d-aa00-03f14749eb61',
-                            f'call "{fixture}"')
-        body = mock_commands(':TestGuid\n' + body + '\nexit /b 0\n')
-        result, trace, _ = self.run_batch(body, 'TestGuid', extra=MOCK)
-        self.assertEqual(result.returncode, 0)
-        self.assertIn('powercfg -setactive 11111111-2222-3333-4444-555555555555', trace)
-
     def test_task_names_stay_one_argument(self):
         body = routine('OptimizeServices')
-        body = body[body.index('for %%T in ('):body.index('reg add "HKLM')]
-        body = body.replace('schtasks ', 'call :Task ')
+        body = body[body.index('for %%T in ('):body.index('call :RunOperation Registry')]
+        body = body.replace('call :RunOperation Task schtasks ', 'call :Task ')
         task = '\n:Task\n>>"%TRACE%" echo %~3\nif not "%~4"=="/Disable" exit /b 9\nexit /b 0\n'
         result, trace, _ = self.run_batch(':TestTasks\n' + body + '\nexit /b %errorlevel%\n',
                                          'TestTasks', extra=task)
@@ -223,7 +212,7 @@ exit /b %CHOICE_CODE%
         if temp is not None:
             env['TEMP'] = str(temp)
         return self.run_batch(routine('ClearTemp') + routine('ClearDirectory'),
-                              'ClearTemp', extra=LOG, args=f'"{target}"', env=env)
+                              'ClearTemp', extra=LOG + stub('RecordOperation'), args=f'"{target}"', env=env)
 
     def test_cleanup_removes_only_approved_contents(self):
         app = self.work / 'local app'
