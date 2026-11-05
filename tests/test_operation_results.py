@@ -686,8 +686,7 @@ foreach($name in @('old.tmp','recent.tmp','old.exe')) {
     [IO.File]::WriteAllText($path,'fixture')
     if($name -ne 'recent.tmp'){(Get-Item $path).LastWriteTime=(Get-Date).AddDays(-40)}
 }
-function Get-CleanupRoots {param($Scope) [pscustomobject]@{Path=$root;Category='Fixture';Days=30;Extensions=@('.tmp')}}
-$files=@(Get-CleanupCandidates Safe)
+$files=@(Get-CleanupFiles @([pscustomobject]@{Path=$root;Category='Fixture';Days=30;Extensions=@('.tmp')}))
 if($files.Count -ne 1 -or (Split-Path $files[0].Path -Leaf) -ne 'old.tmp'){throw 'Incorrect candidate selection'}
 if(Test-CleanupPath $env:SystemRoot){throw 'Windows directory accepted'}
 if(Test-CleanupPath ([IO.Path]::GetPathRoot($root))){throw 'Drive root accepted'}
@@ -869,7 +868,7 @@ $env:ProgramData=Join-Path $base 'programdata'
 $env:APPDATA=Join-Path $base 'roaming'
 $env:LOCALAPPDATA=Join-Path $base 'local'
 function Get-DownloadsFolder {throw 'Quick must not inspect Downloads'}
-$quickRoots=@(Get-CleanupRoots Safe)
+$quickRoots=@(Get-AutomaticCleanupRoots 'Safe')
 if(-not @($quickRoots | Where-Object Category -eq 'Old application log').Count){throw 'Quick missed app logs'}
 if(-not @($quickRoots | Where-Object Category -eq 'Old application crash report').Count){throw 'Quick missed app crashes'}
 function Get-DownloadsFolder {Join-Path $base 'downloads'}

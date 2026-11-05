@@ -1,4 +1,5 @@
 # Loaded by optimizer-operations.ps1. File cleanup has no permanent-delete path.
+$script:CleanupPackageExtensions = @('.exe','.msi','.msix','.msixbundle','.appx','.appxbundle','.cab','.msp','.zip','.7z','.rar','.iso')
 function Initialize-RecycleApi {
     if ('OptimizerRecycle' -as [type]) { return }
     Add-Type -TypeDefinition @'
@@ -125,18 +126,21 @@ function Show-StorageSummary {
     Write-Host 'Links, cloud placeholders and inaccessible folders are skipped. For a complete breakdown, open Settings > System > Storage.'
 }
 
-function Get-CleanupRoots([string]$Scope) {
-    if ($Scope -eq 'Safe') { Get-AutomaticCleanupRoots 'Safe' }
-    if ($Scope -eq 'Deep') {
-        $downloads = Get-DownloadsFolder
-        if ($downloads) {
-            [pscustomobject]@{Path=$downloads; Category='Old download - review'; Days=90; Extensions=@('.exe','.msi','.msix','.msixbundle','.appx','.appxbundle','.cab','.msp','.zip','.7z','.rar','.iso')}
+function Get-CleanupCandidates([string]$Scope) {
+    $roots = @(
+        if ($Scope -eq 'Safe') { Get-AutomaticCleanupRoots 'Safe' }
+        if ($Scope -eq 'Deep') {
+            $downloads = Get-DownloadsFolder
+            if ($downloads) {
+                [pscustomobject]@{Path=$downloads; Category='Old download - review'; Days=90; Extensions=$script:CleanupPackageExtensions}
+            }
+            $videos = [Environment]::GetFolderPath('MyVideos')
+            if ($videos) {
+                [pscustomobject]@{Path=(Join-Path $videos 'Captures'); Category='Old recording - review'; Days=90; Extensions=@('.mp4','.mkv','.wmv')}
+            }
         }
-        $videos = [Environment]::GetFolderPath('MyVideos')
-        if ($videos) {
-            [pscustomobject]@{Path=(Join-Path $videos 'Captures'); Category='Old recording - review'; Days=90; Extensions=@('.mp4','.mkv','.wmv')}
-        }
-    }
+    )
+    Get-CleanupFiles $roots
 }
 
 function Test-CleanupPath([string]$Path) {
@@ -162,10 +166,6 @@ function Test-CleanupPath([string]$Path) {
         $item = if ($item.PSIsContainer) { $item.Parent } else { $item.Directory }
     }
     return $true
-}
-
-function Get-CleanupCandidates([string]$Scope) {
-    Get-CleanupFiles @(Get-CleanupRoots $Scope)
 }
 
 function Get-CleanupFiles($Roots) {
@@ -323,7 +323,7 @@ function Get-DuplicateDownloads {
     if (-not $downloads -or -not (Test-Path -LiteralPath $downloads -PathType Container) -or -not (Test-CleanupPath $downloads)) { return }
     # Only loose downloads: never deduplicate inside extracted/portable applications.
     $files = @(Get-ChildItem -LiteralPath $downloads -File -ErrorAction Stop | Where-Object {
-        $_.Length -gt 0 -and $_.Extension -in @('.exe','.msi','.msix','.msixbundle','.appx','.appxbundle','.cab','.msp','.zip','.7z','.rar','.iso') -and (Test-CleanupPath $_.FullName)
+        $_.Length -gt 0 -and $_.Extension -in $script:CleanupPackageExtensions -and (Test-CleanupPath $_.FullName)
     })
     foreach ($size in @($files | Group-Object Length,Extension | Where-Object Count -gt 1)) {
         $hashed = @(foreach ($file in $size.Group) {
