@@ -248,6 +248,134 @@ function Invoke-PerformancePlan {
     }
 }
 
+function Enable-WindowedOptimizations {
+    $build = [int](Get-ItemPropertyValue 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name CurrentBuildNumber -ErrorAction Stop)
+    if ($build -lt 22621) {
+        Write-OperationResult Unsupported 'Windowed game optimizations' 'Requires Windows 11 22H2 or newer.'; return
+    }
+    $path = 'HKCU\Software\Microsoft\DirectX\UserGpuPreferences'
+    $name = 'DirectXUserGlobalSettings'
+    $state = Get-RegistryState $path $name
+    $settings = if ($state.Exists) { [string]$state.Value } else { '' }
+    # This is a compound preference. Preserve Auto HDR, VRR and unknown flags.
+    $parts = @($settings -split ';' | Where-Object { $_ -and $_ -notmatch '^\s*SwapEffectUpgradeEnable\s*=' })
+    $wanted = (($parts + 'SwapEffectUpgradeEnable=1') -join ';') + ';'
+    Invoke-RegistryChange @('reg','add',$path,'/v',$name,'/t','REG_SZ','/d',$wanted,'/f')
+    Write-Host 'Windowed optimization applies to compatible DX10/DX11 games. Restart affected games; use per-game Graphics settings for exceptions.'
+}
+
+function Set-MemoryIntegrity {
+    param([bool]$Enable)
+    $path = 'HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity'
+    $locked = Get-RegistryState $path 'Locked'
+    $vbsLocked = Get-RegistryState 'HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard' 'Locked'
+    $policy = Get-RegistryState 'HKLM\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard' 'HypervisorEnforcedCodeIntegrity'
+    if (($locked.Exists -and $locked.Value -eq 1) -or ($vbsLocked.Exists -and $vbsLocked.Value -eq 1) -or $policy.Exists) {
+        Write-OperationResult Unsupported 'Memory integrity' 'Enforced by policy or UEFI lock; no attempt to bypass it was made.'; return
+    }
+    $wanted = [int]$Enable
+    $before = Get-RegistryState $path 'Enabled'
+    $running = 2 -in @((Get-CimInstance -Namespace root\Microsoft\Windows\DeviceGuard -ClassName Win32_DeviceGuard -ErrorAction Stop).SecurityServicesRunning)
+    Write-Host 'Disabling memory integrity reduces kernel protection and may prevent anti-cheat protected games from launching. Virtualization and other VBS services are not changed.'
+    if (-not $before.Exists -or $before.Value -ne $wanted) {
+        Invoke-RegistryChange @('reg','add',$path,'/v','Enabled','/t','REG_DWORD','/d',"$wanted",'/f')
+        Write-OperationResult RestartRequired 'Memory integrity' "Saved Enabled=$wanted. Restart and check Windows Security before assuming the runtime state changed." $true
+    } elseif ($running -ne $Enable) {
+        Write-OperationResult RestartRequired 'Memory integrity' "Enabled=$wanted is configured, but the running HVCI state differs. Restart to apply."
+    } else {
+        Write-OperationResult AlreadyConfigured 'Memory integrity' "Configured and running state agree: Enabled=$wanted." $true
+    }
+}
+
+function Get-DisplayModes {
+    if (-not ('OptimizerDisplay' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+public static class OptimizerDisplay {
+    [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+    struct Device {
+        public int Size;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=32)] public string Name;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=128)] public string Description;
+        public uint Flags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=128)] public string Id;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=128)] public string Key;
+    }
+    [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+    struct Mode {
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=32)] public string DeviceName;
+        public ushort SpecVersion, DriverVersion, Size, DriverExtra;
+        public uint Fields;
+        public int X, Y;
+        public uint Orientation, FixedOutput;
+        public short Color, Duplex, YResolution, TTOption, Collate;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=32)] public string FormName;
+        public ushort LogPixels;
+        public uint BitsPerPel, Width, Height, Flags, Frequency;
+        public uint ICMMethod, ICMIntent, MediaType, DitherType, Reserved1, Reserved2, PanningWidth, PanningHeight;
+    }
+    public class Info {
+        public string Name;
+        public uint Width, Height, CurrentHz, HighestHz;
+    }
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)]
+    static extern bool EnumDisplayDevices(string device, uint index, ref Device data, uint flags);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)]
+    static extern bool EnumDisplaySettings(string name, int index, ref Mode mode);
+    static Mode NewMode() { return new Mode { Size=(ushort)Marshal.SizeOf(typeof(Mode)) }; }
+    public static Info[] Read() {
+        var result=new List<Info>();
+        for(uint i=0;;i++) {
+            var device=new Device { Size=Marshal.SizeOf(typeof(Device)) };
+            if(!EnumDisplayDevices(null,i,ref device,0)) break;
+            if((device.Flags & 1)==0 || (device.Flags & 8)!=0) continue;
+            var current=NewMode();
+            if(!EnumDisplaySettings(device.Name,-1,ref current)) continue;
+            uint highest=current.Frequency;
+            for(int j=0;;j++) {
+                var mode=NewMode();
+                if(!EnumDisplaySettings(device.Name,j,ref mode)) break;
+                if(mode.Width==current.Width && mode.Height==current.Height &&
+                   mode.BitsPerPel==current.BitsPerPel && mode.Orientation==current.Orientation &&
+                   mode.Frequency>highest) highest=mode.Frequency;
+            }
+            result.Add(new Info { Name=device.Name, Width=current.Width, Height=current.Height,
+                CurrentHz=current.Frequency, HighestHz=highest });
+        }
+        return result.ToArray();
+    }
+}
+'@
+    }
+    [OptimizerDisplay]::Read()
+}
+
+function Show-GraphicsConfiguration {
+    $screens = @(Get-DisplayModes)
+    if (-not $screens.Count) { Write-OperationResult Unverified 'Display refresh' 'No active display modes could be read.' }
+    foreach ($screen in $screens) {
+        $detail = "$($screen.Width)x$($screen.Height) at $($screen.CurrentHz) Hz; highest enumerated rate at this resolution: $($screen.HighestHz) Hz."
+        if ($screen.HighestHz -gt $screen.CurrentHz) {
+            Write-OperationResult Unverified "Display $($screen.Name)" "$detail Review Settings > System > Display > Advanced display. No mode was changed."
+        } else { Write-OperationResult AlreadyConfigured "Display $($screen.Name)" $detail $true }
+    }
+    $gpus = @(Get-CimInstance Win32_VideoController -ErrorAction Stop)
+    Write-Host ('Detected graphics adapters: ' + (($gpus | ForEach-Object Name) -join ', '))
+    $key = 'HKCU:\Software\Microsoft\DirectX\UserGpuPreferences'
+    if (Test-Path -LiteralPath $key) {
+        $preferences = Get-ItemProperty -LiteralPath $key -ErrorAction Stop
+        foreach ($property in $preferences.PSObject.Properties) {
+            if ($property.Name -match '\.exe$' -and $property.Value -match 'GpuPreference=([012]);?') {
+                $label = @('Windows default','power saving','high performance')[[int]$Matches[1]]
+                Write-Host ("GPU preference: {0} = {1}" -f $property.Name,$label)
+            }
+        }
+    }
+    Write-OperationResult Unverified 'Per-game GPU selection' 'Adapter names and saved preferences do not prove which GPU a game uses. Check Settings > System > Display > Graphics and the running game GPU engine; no preferences were changed.'
+}
+
 function Get-NativeDesiredState {
     param([string[]]$Tokens)
     $exe = [IO.Path]::GetFileNameWithoutExtension($Tokens[0]).ToLowerInvariant()
@@ -363,6 +491,9 @@ function Invoke-Operation {
             Memory { Invoke-MemoryChange $tokens[1] ($tokens[2] -eq '1') }
             Pagefile { Invoke-PagefileChange $tokens[1] }
             Plan { Invoke-PerformancePlan }
+            Windowed { Enable-WindowedOptimizations }
+            Integrity { Set-MemoryIntegrity ($tokens[1] -eq 'On') }
+            Graphics { Show-GraphicsConfiguration }
             Native { Invoke-GenericChange $tokens[1..($tokens.Count-1)] }
             default { throw 'Unknown operation kind.' }
         }

@@ -91,7 +91,7 @@ echo.
 echo    %CLR_MENU%[3]%CLR_RESET% Create system restore point
 echo    %CLR_MENU%[4]%CLR_RESET% Debloat Windows 11 (remove consumer/OEM apps)
 echo    %CLR_MENU%[5]%CLR_RESET% Disable touchscreen, pen, and ink features
-echo    %CLR_MENU%[6]%CLR_RESET% Apply gaming performance tweaks
+echo    %CLR_MENU%[6]%CLR_RESET% Gaming settings - includes memory integrity OFF
 echo    %CLR_MENU%[7]%CLR_RESET% Optimize services, telemetry, and indexing
 echo    %CLR_MENU%[8]%CLR_RESET% Network optimizations (apply/revert)
 echo    %CLR_MENU%[9]%CLR_RESET% Disable animations and visual effects
@@ -101,6 +101,8 @@ echo    %CLR_MENU%[C]%CLR_RESET% Advanced: GPU and storage optimizations
 echo    %CLR_MENU%[D]%CLR_RESET% Advanced: Audio latency reduction
 echo    %CLR_MENU%[E]%CLR_RESET% Optional: Disable Xbox services (breaks Game Bar)
 echo.
+echo    %CLR_MENU%[G]%CLR_RESET% Check display refresh and GPU preferences
+echo    %CLR_MENU%[M]%CLR_RESET% Memory integrity on/off
 echo    %CLR_MENU%[H]%CLR_RESET% Help / README
 echo    %CLR_MENU%[P]%CLR_RESET% View operation results
 echo    %CLR_MENU%[V]%CLR_RESET% Verify optimizations status
@@ -125,6 +127,8 @@ if /I "%choice%"=="B" call :FreeDiskSpace & call :PauseReturn & goto Menu
 if /I "%choice%"=="C" call :AdvancedGPUStorage & call :PauseReturn & goto Menu
 if /I "%choice%"=="D" call :OptimizeAudio & call :PauseReturn & goto Menu
 if /I "%choice%"=="E" call :DisableXboxServices & call :PauseReturn & goto Menu
+if /I "%choice%"=="G" call :RunOperation Graphics Check & call :PauseReturn & goto Menu
+if /I "%choice%"=="M" call :MemoryIntegrityMenu & call :PauseReturn & goto Menu
 if /I "%choice%"=="H" call :ShowHelp & call :PauseReturn & goto Menu
 if /I "%choice%"=="P" call :ShowChangesSummary & call :PauseReturn & goto Menu
 if /I "%choice%"=="V" call :VerifyOptimizations & call :PauseReturn & goto Menu
@@ -366,6 +370,16 @@ echo [*] Attempts finished. Review the operation results for confirmed changes a
 echo     Log: %LOG_FILE%
 exit /b 0
 
+:MemoryIntegrityMenu
+choice /c 123 /n /m "Memory integrity: [1] Off (less protection) [2] On [3] Back: "
+if errorlevel 3 exit /b 0
+if errorlevel 2 (
+    call :RunOperation Integrity On
+) else (
+    call :RunOperation Integrity Off
+)
+exit /b %errorlevel%
+
 :GamingTweaksMenu
 call :WarnIfOnBattery
 if errorlevel 1 exit /b 1
@@ -374,6 +388,9 @@ exit /b %errorlevel%
 
 :ApplyGamingTweaks
 call :BackupRegistryKeys
+call :RunOperation Windowed Enable
+call :RunOperation Integrity Off
+call :RunOperation Graphics Check
 call :Log "Applying gaming tweaks"
 echo.
 echo %CLR_TITLE%  ======================================================================%CLR_RESET%
@@ -458,12 +475,11 @@ call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Services\kbdc
 echo [*] Enabling full Game Mode stack...
 call :RunOperation Registry reg add "HKCU\Software\Microsoft\GameBar" /v UseNexusForGameBarEnabled /t REG_DWORD /d 0 /f
 
-echo [*] Optimizing system timer resolution for better frame pacing...
+echo [*] Restoring automatic Windows timer selection...
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\kernel" /v GlobalTimerResolutionRequests /t REG_DWORD /d 1 /f
-REM bcdedit changes - can cause issues on some systems, proceed with caution
-for %%B in ("useplatformclock true" "disabledynamictick yes") do (
-    call :RunOperation Native bcdedit /set %%~B
-    if errorlevel 1 call :Log "Warning: bcdedit /set %%~B failed; leaving boot security settings unchanged"
+REM Remove legacy debug timer overrides instead of forcing platform timers.
+for %%B in (useplatformclock disabledynamictick) do (
+    call :RunOperation Native bcdedit /deletevalue %%B
 )
 
 echo [*] Prioritizing foreground apps (games) over background tasks...

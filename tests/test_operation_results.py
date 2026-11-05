@@ -230,5 +230,63 @@ $null=Invoke-Operation ('Registry reg add "'+$path+'" /v '+$name+' /t '+$type+' 
 ''')
         self.assertEqual([r['Status'] for r in rows], ['AlreadyConfigured'])
 
+    def test_windowed_flag_preserves_other_graphics_preferences(self):
+        rows, _ = self.run_case(r'''
+function Get-ItemPropertyValue {param($Path,$Name,$ErrorAction) '26300'}
+function Get-RegistryState {param($Path,$Name) @{Exists=$true;Type='String';Value='AutoHDREnable=1;SwapEffectUpgradeEnable=0;FutureFlag=keep;'}}
+function Invoke-RegistryChange {param($Tokens)
+    $value=Get-ArgumentValue $Tokens '/d'
+    if($value -ne 'AutoHDREnable=1;FutureFlag=keep;SwapEffectUpgradeEnable=1;'){throw "Preferences lost: $value"}
+    Write-OperationResult Applied 'Windowed' $value $true
+}
+$null=Invoke-Operation 'Windowed Enable'
+''')
+        self.assertEqual(rows[0]['Status'], 'Applied')
+
+    def test_old_windows_skips_windowed_flag_without_writing(self):
+        rows, _ = self.run_case(r'''
+function Get-ItemPropertyValue {param($Path,$Name,$ErrorAction) '19045'}
+function Invoke-RegistryChange {throw 'Unsupported Windows must not be modified'}
+$null=Invoke-Operation 'Windowed Enable'
+''')
+        self.assertEqual(rows[0]['Status'], 'Unsupported')
+
+    def test_integrity_off_does_not_bypass_lock(self):
+        rows, _ = self.run_case(r'''
+function Get-RegistryState {param($Path,$Name) if($Name -eq 'Locked'){@{Exists=$true;Value=1}}else{@{Exists=$false}}}
+function Invoke-RegistryChange {throw 'Locked security must not be modified'}
+$null=Invoke-Operation 'Integrity Off'
+''')
+        self.assertEqual(rows[0]['Status'], 'Unsupported')
+
+    def test_integrity_configuration_and_runtime_are_distinguished(self):
+        rows, _ = self.run_case(r'''
+$script:enabled=1; $script:running=@(2)
+function Get-RegistryState {param($Path,$Name) if($Name -eq 'Enabled'){@{Exists=$true;Value=$script:enabled}}else{@{Exists=$false}}}
+function Get-CimInstance {param($Namespace,$ClassName,$ErrorAction) [pscustomobject]@{SecurityServicesRunning=$script:running}}
+function Invoke-RegistryChange {param($Tokens) $script:enabled=[int](Get-ArgumentValue $Tokens '/d')}
+$null=Invoke-Operation 'Integrity Off'
+$null=Invoke-Operation 'Integrity Off'
+$script:running=@(0); $null=Invoke-Operation 'Integrity Off'
+$null=Invoke-Operation 'Integrity On'
+''')
+        self.assertEqual([r['Status'] for r in rows], ['RestartRequired','RestartRequired','AlreadyConfigured','RestartRequired'])
+
+    def test_display_check_never_changes_modes_or_gpu_preferences(self):
+        rows, output = self.run_case(r'''
+function Get-DisplayModes {@(
+    [pscustomobject]@{Name='First';Width=2560;Height=1440;CurrentHz=60;HighestHz=144},
+    [pscustomobject]@{Name='Second';Width=1920;Height=1080;CurrentHz=144;HighestHz=144}
+)}
+function Get-CimInstance {param($ClassName,$ErrorAction) [pscustomobject]@{Name='Example GPU'}}
+function Test-Path {param($LiteralPath) $false}
+function Set-ItemProperty {throw 'Display check must not write'}
+function Invoke-NativeOperation {throw 'Display check must not run mutations'}
+$null=Invoke-Operation 'Graphics Check'
+''')
+        self.assertEqual([r['Status'] for r in rows], ['Unverified','AlreadyConfigured','Unverified'])
+        self.assertIn('144 Hz', rows[0]['Detail'])
+        self.assertIn('Example GPU', output)
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

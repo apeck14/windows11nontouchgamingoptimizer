@@ -8,9 +8,14 @@ Extract the repository ZIP, keeping `win11_nontouch_gaming_optimiser.bat` and `o
 
 - **1/F Full:** all routines, including aggressive networking and advanced GPU/storage settings.
 - **2 Recommended:** debloat, gaming settings, services, safe networking, visuals and core parking.
+- **G:** display refresh/GPU checks. **M:** memory integrity on/off.
 - **P:** session operation results. **V:** limited live configuration checks.
 
 Both presets attempt a restore point; failure offers a continue/cancel choice, defaulting to cancel. Individual actions do not create restore points. Spotify is preserved; disabling Xbox services requires a separate selection.
+
+Both presets enable windowed-game optimization for compatible DX10/DX11 games, remove forced debug timer overrides, and **disable memory integrity (HVCI) by default**. This reduces security and may block anti-cheat protected games. [M] can re-enable it; restart afterward. Policy/UEFI enforcement is not bypassed. Other virtualization/VBS services are left unchanged.
+
+[G] reports current/highest enumerated refresh rates at the current resolution and saved GPU preferences. It never changes resolution or guesses which GPU a game actually uses. Review Windows Graphics/Advanced display settings for per-game exceptions.
 
 ## Results and recovery
 

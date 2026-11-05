@@ -137,6 +137,17 @@ class Regressions(unittest.TestCase):
                 prelude='set "DVR_PREF_SET="\ncall :Seed\n', env={'CHOICE_CODE': str(selection)})
             self.assertIn(f'DVR={int(selection == 1)}', result.stdout)
 
+    def test_gaming_defaults_request_graphics_and_integrity_changes_without_forced_timers(self):
+        result, trace, _ = self.run_batch(mock_commands(routine('ApplyGamingTweaks')), 'ApplyGamingTweaks',
+            extra=LOG + MOCK + stub('BackupRegistryKeys'),
+            env={'DVR_PREF_SET':'1', 'DISABLE_DVR':'0', 'GPU_VENDOR':'NVIDIA'})
+        self.assertEqual(result.returncode, 0)
+        for operation in ['Windowed Enable', 'Integrity Off', 'Graphics Check',
+                          'Native bcdedit /deletevalue useplatformclock',
+                          'Native bcdedit /deletevalue disabledynamictick']:
+            self.assertIn(operation, trace)
+        self.assertNotIn('bcdedit /set', trace)
+
     def test_memory_and_pagefile_routines_complete_for_all_ram_ranges(self):
         for name in ['OptimizeMemory', 'OptimizePageFile']:
             for ram in ['4', '8', '32']:
