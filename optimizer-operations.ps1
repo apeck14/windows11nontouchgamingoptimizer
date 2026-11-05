@@ -306,7 +306,7 @@ function Invoke-PerformancePlan {
         $named = Invoke-NativeOperation powercfg @('-changename',$guid,'Gaming Optimizer')
         if ($named.Code -ne 0) { throw 'Could not name optimizer power plan.' }
         $keeper = Get-PerformancePlans | Where-Object Id -eq $guid
-        if (-not $keeper) { throw 'Created power plan could not be verified.' }
+        if (-not $keeper -or $keeper.Name -ne 'Gaming Optimizer') { throw 'Created power plan could not be verified.' }
         Write-OperationResult Applied 'Create performance power plan' "Created and verified $guid." $true
     }
     Invoke-GenericChange @('powercfg','-setactive',$keeper.Id)

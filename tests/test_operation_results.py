@@ -258,6 +258,21 @@ if($script:created -ne 1 -or $script:plans[0].Name -ne 'Gaming Optimizer'){throw
 ''')
         self.assertEqual([r['Status'] for r in rows], ['Applied','Applied','AlreadyConfigured'])
 
+    def test_power_plan_rename_noop_is_not_reported_as_verified(self):
+        rows, _ = self.run_case(r'''
+function Get-PowerCapabilities {@{ModernStandby=$false;Portable=$false}}
+$script:plans=@()
+function Get-PerformancePlans {$script:plans}
+function Invoke-NativeOperation {param($Program,$Arguments)
+    if($Arguments[0] -eq '-duplicatescheme'){$script:plans=@([pscustomobject]@{Id=$Arguments[2];Name='Unexpected name';Active=$false})}
+    elseif($Arguments[0] -ne '-changename'){throw 'Unverified plan must not be activated or other plans deleted'}
+    [pscustomobject]@{Code=0;Output=''}
+}
+$null=Invoke-Operation 'Plan Ultimate'
+''')
+        self.assertEqual([r['Status'] for r in rows], ['Failed'])
+        self.assertIn('could not be verified', rows[0]['Detail'])
+
     def test_power_plan_activation_failure_never_deletes_other_plans(self):
         rows, _ = self.run_case(r'''
 function Get-PowerCapabilities {@{ModernStandby=$false;Portable=$false}}
