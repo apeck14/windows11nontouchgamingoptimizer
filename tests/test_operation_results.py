@@ -912,20 +912,19 @@ $null=Invoke-Operation 'Integrity On'
         self.assertEqual([r['Status'] for r in rows], ['RestartRequired','RestartRequired','AlreadyConfigured','RestartRequired'])
 
     def test_display_check_never_changes_modes_or_gpu_preferences(self):
-        rows, output = self.run_case(r'''
+        rows, _ = self.run_case(r'''
 function Get-DisplayModes {@(
     [pscustomobject]@{Name='First';Width=2560;Height=1440;CurrentHz=60;HighestHz=144},
     [pscustomobject]@{Name='Second';Width=1920;Height=1080;CurrentHz=144;HighestHz=144}
 )}
-function Get-CimInstance {param($ClassName,$ErrorAction) [pscustomobject]@{Name='Example GPU'}}
-function Test-Path {param($LiteralPath) $false}
+function Get-CimInstance {throw 'Unused graphics inventory must not run'}
+function Get-ItemProperty {throw 'Unused graphics inventory must not run'}
 function Set-ItemProperty {throw 'Display check must not write'}
 function Invoke-NativeOperation {throw 'Display check must not run mutations'}
 $null=Invoke-Operation 'Graphics Check'
 ''')
         self.assertEqual([r['Status'] for r in rows], ['Unverified','AlreadyConfigured','Unverified'])
         self.assertIn('144 Hz', rows[0]['Detail'])
-        self.assertIn('Example GPU', output)
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

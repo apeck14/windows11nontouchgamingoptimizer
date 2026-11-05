@@ -548,19 +548,7 @@ function Show-GraphicsConfiguration {
             Write-OperationResult Unverified "Display $($screen.Name)" "$detail Review Settings > System > Display > Advanced display. No mode was changed."
         } else { Write-OperationResult AlreadyConfigured "Display $($screen.Name)" $detail $true }
     }
-    $gpus = @(Get-CimInstance Win32_VideoController -ErrorAction Stop)
-    if (-not $env:OPTIMIZER_FULL_RUN) { Write-Host ('Detected graphics adapters: ' + (($gpus | ForEach-Object Name) -join ', ')) }
-    $key = 'HKCU:\Software\Microsoft\DirectX\UserGpuPreferences'
-    if (Test-Path -LiteralPath $key) {
-        $preferences = Get-ItemProperty -LiteralPath $key -ErrorAction Stop
-        foreach ($property in $preferences.PSObject.Properties) {
-            if ($property.Name -match '\.exe$' -and $property.Value -match 'GpuPreference=([012]);?') {
-                $label = @('Windows default','power saving','high performance')[[int]$Matches[1]]
-                if (-not $env:OPTIMIZER_FULL_RUN) { Write-Host ("GPU preference: {0} = {1}" -f $property.Name,$label) }
-            }
-        }
-    }
-    Write-OperationResult Unverified 'Per-game GPU selection' 'Adapter names and saved preferences do not prove which GPU a game uses. Check Settings > System > Display > Graphics and the running game GPU engine; no preferences were changed.'
+    Write-OperationResult Unverified 'Per-game GPU selection' 'Check Settings > System > Display > Graphics and the running game GPU engine; no preferences were changed.'
 }
 
 function Get-NativeDesiredState {

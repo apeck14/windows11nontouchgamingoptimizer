@@ -48,13 +48,12 @@ function Convert-Mw4Config {
     }
     if ($Nvidia) { $rules.NvidiaReflex=@('Enabled + boost') }
     $changes = [Collections.Generic.List[object]]::new()
-    $skipped = [Collections.Generic.List[string]]::new()
-    $found = [Collections.Generic.List[string]]::new()
+    $counts = @{Found=0;Skipped=0}
     $pattern = '(?m)^(?<prefix>[ \t]*(?<key>\w+)(?:@[0-9;]+|:[0-9.]+)[ \t]*=[ \t]*)(?<value>[^\r\n]*?)(?<suffix>[ \t]*(?://[^\r\n]*)?)(?=\r?$)'
     $converted = [regex]::Replace($Text, $pattern, [Text.RegularExpressions.MatchEvaluator]{param($m)
         $key = $m.Groups['key'].Value
         if (-not $rules.ContainsKey($key)) { return $m.Value }
-        $found.Add($key)
+        $counts.Found++
         $raw = $m.Groups['value'].Value
         $quoted = $raw.StartsWith('"') -and $raw.EndsWith('"')
         $current = if ($quoted) { $raw.Substring(1,$raw.Length-2) } else { $raw }
@@ -72,12 +71,12 @@ function Convert-Mw4Config {
             $compatible = [double]::TryParse($current,[Globalization.NumberStyles]::Float,[Globalization.CultureInfo]::InvariantCulture,[ref]$number) -and $number -ge 0 -and $number -le 1
             if ($compatible -and $number -eq 0) { return $m.Value }
         }
-        if (-not $compatible) { $skipped.Add($key); return $m.Value }
+        if (-not $compatible) { $counts.Skipped++; return $m.Value }
         $changes.Add([pscustomobject]@{Key=$key;Before=$current;After=$target})
         if ($quoted) { $target = '"'+$target+'"' }
         return $m.Groups['prefix'].Value + $target + $m.Groups['suffix'].Value
     })
-    [pscustomobject]@{Text=$converted;Changes=@($changes.ToArray());Skipped=$skipped.Count;Compatible=$found.Count-$skipped.Count}
+    [pscustomobject]@{Text=$converted;Changes=@($changes.ToArray());Skipped=$counts.Skipped;Compatible=$counts.Found-$counts.Skipped}
 }
 
 function Get-Mw4Hash {
@@ -201,10 +200,7 @@ function Invoke-Mw4Optimization {
             } catch [NotSupportedException] { Write-OperationResult Unsupported 'MW4 NVIDIA driver' $_.Exception.Message }
               catch { Write-OperationResult Failed 'MW4 NVIDIA driver' $_.Exception.Message }
         }
-        if (-not $plans.Count -and -not $driverPlan.Count) {
-            Write-Host '  No further compatible changes to apply. See the summary for skipped items.'
-            return
-        }
+        if (-not $plans.Count -and -not $driverPlan.Count) { return }
         Assert-Mw4Closed
         $backup = Join-Path (Get-Mw4BackupRoot) ((Get-Date -Format 'yyyyMMdd_HHmmss_fffffff')+'_'+[guid]::NewGuid().ToString('N'))
         $null = New-Item -ItemType Directory -Path $backup
@@ -238,10 +234,9 @@ function Invoke-Mw4Optimization {
                 $actual = $driver.Read($driver.FindProfile($change.App),$change.Id)
                 if ($null -eq $actual -or $actual.Data -ne $change.After) { throw 'Driver read-back did not match.' }
                 Write-OperationResult Applied "MW4 NVIDIA $($change.App) $($change.Name)" "Saved and verified. Backup: $backup" $true
-            } catch [NotSupportedException] { $driver.Reload(); Write-OperationResult Unsupported "MW4 NVIDIA $($change.Name)" $_.Exception.Message }
-              catch { $driver.Reload(); Write-OperationResult Failed "MW4 NVIDIA $($change.Name)" $_.Exception.Message }
+            } catch [NotSupportedException] { Write-OperationResult Unsupported "MW4 NVIDIA $($change.Name)" $_.Exception.Message }
+              catch { Write-OperationResult Failed "MW4 NVIDIA $($change.Name)" $_.Exception.Message }
         }
-        Write-Host '  Game-file and driver values checked; FPS gains require an in-game benchmark.'
     } finally { if ($driver) { $driver.Dispose() } }
 }
 
@@ -294,7 +289,7 @@ function Restore-Mw4Optimization {
                     if (-not $actual -or -not $actual.UserOverride -or $actual.Data -ne $change.Before) { throw 'Driver restore read-back did not match.' }
                 } elseif ($actual -and $actual.UserOverride) { throw 'Driver override was not removed.' }
                 Write-OperationResult Applied "MW4 restore NVIDIA $($change.Name)" 'Original driver override/inheritance restored.' $true
-            } catch { if ($driver) { $driver.Reload() }; Write-OperationResult Failed "MW4 restore NVIDIA $($change.Name)" $_.Exception.Message }
+            } catch { Write-OperationResult Failed "MW4 restore NVIDIA $($change.Name)" $_.Exception.Message }
         }
     } finally { if ($driver) { $driver.Dispose() } }
 }

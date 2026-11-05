@@ -3,7 +3,6 @@ setlocal EnableExtensions EnableDelayedExpansion
 
 set "SCRIPT_DIR=%~dp0"
 set "REGISTRY_BACKUP_DONE="
-set "OPTIMIZER_FULL_RUN="
 pushd "%SCRIPT_DIR%" >nul 2>&1
 
 title Windows 11 Gaming Optimizer
@@ -12,14 +11,12 @@ color 0A
 for /f %%A in ('"prompt $E & for %%B in (1) do rem"') do set "ESC=%%A"
 if defined ESC (
     set "CLR_TITLE=%ESC%[95;1m"
-    set "CLR_SUBTITLE=%ESC%[96m"
     set "CLR_MENU=%ESC%[93;1m"
     set "CLR_SUCCESS=%ESC%[92m"
     set "CLR_WARNING=%ESC%[93m"
     set "CLR_RESET=%ESC%[0m"
 ) else (
     set "CLR_TITLE="
-    set "CLR_SUBTITLE="
     set "CLR_MENU="
     set "CLR_SUCCESS="
     set "CLR_WARNING="
@@ -29,15 +26,7 @@ if defined ESC (
 set "POWERSHELL=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 
 set "OPERATIONS_SCRIPT=%SCRIPT_DIR%optimizer-operations.ps1"
-if not exist "%SCRIPT_DIR%optimizer-cleanup.ps1" (
-    echo [!] Missing optimizer-cleanup.ps1. Extract the complete repository ZIP.
-    exit /b 1
-)
-if not exist "%OPERATIONS_SCRIPT%" (
-    echo [!] Missing optimizer-operations.ps1. Download and extract the complete repository ZIP.
-    exit /b 1
-)
-for %%F in (optimizer-mw4.ps1 optimizer-nvidia.cs) do if not exist "%SCRIPT_DIR%%%F" (
+for %%F in (optimizer-cleanup.ps1 optimizer-operations.ps1 optimizer-mw4.ps1 optimizer-nvidia.cs) do if not exist "%SCRIPT_DIR%%%F" (
     echo [!] Missing %%F. Extract the complete repository ZIP.
     exit /b 1
 )
@@ -133,7 +122,6 @@ call :WarnIfOnBattery
 if errorlevel 1 exit /b 1
 call :PrepareOptimization
 if errorlevel 1 exit /b 1
-set "OPTIMIZER_FULL_RUN=1"
 echo [*] Step 1/13: Disabling touch/pen components...
 call :DisableTouchFeatures
 echo [*] Step 2/13: Applying gaming tweaks...
@@ -160,7 +148,6 @@ echo [*] Step 12/13: Configuring CPU core parking...
 call :DisableCoreParking
 echo [*] Step 13/13: Tuning storage-specific settings...
 call :OptimizeStorageByType
-set "OPTIMIZER_FULL_RUN="
 call :Log "Full optimization attempts finished; review operation results"
 call :ShowChangesSummary
 exit /b %errorlevel%

@@ -189,7 +189,7 @@ class Regressions(unittest.TestCase):
         body = mock_commands(routine('ApplyGamingTweaks'))
         result, trace, _ = self.run_batch(body, 'ApplyGamingTweaks',
             extra=LOG + MOCK + stub('BackupRegistryKeys'),
-            env={'OPTIMIZER_FULL_RUN':'1', 'DVR_PREF_SET':'1', 'DISABLE_DVR':'0'})
+            env={'DVR_PREF_SET':'1', 'DISABLE_DVR':'0'})
         self.assertEqual(result.returncode, 0)
         for setting in ('VisualFXSetting', 'EnableTransparency', 'MenuShowDelay'):
             self.assertNotIn(setting, trace)
@@ -198,7 +198,7 @@ class Regressions(unittest.TestCase):
         body = mock_commands(routine('DisableAnimations'))
         for choice in ('1', '2', '3'):
             result, trace, _ = self.run_batch(body, 'DisableAnimations', extra=LOG + MOCK + CHOOSE,
-                                             env={'CHOICE_CODE':choice, 'OPTIMIZER_FULL_RUN':'1'})
+                                             env={'CHOICE_CODE':choice})
             self.assertEqual(result.returncode, 0)
             if choice == '3':
                 self.assertEqual(trace, '')
