@@ -747,7 +747,7 @@ call :Log "Optimizing memory"
 echo [*] Enabling memory compression and optimizing paging...
 if defined RAM_GB (
     if %RAM_GB% LSS 8 (
-        echo     %CLR_WARNING%[!] WARNING: Low RAM detected (%RAM_GB%GB). DisablePagingExecutive may cause instability.%CLR_RESET%
+        echo     %CLR_WARNING%[!] WARNING: Low RAM detected ^(%RAM_GB%GB^). DisablePagingExecutive may cause instability.%CLR_RESET%
         echo     %CLR_WARNING%    Consider adding more RAM for better gaming performance.%CLR_RESET%
         call :Log "Low RAM warning: %RAM_GB%GB detected - DisablePagingExecutive may cause issues"
     )
@@ -813,7 +813,7 @@ if %RAM_GB% GEQ 16 (
     call :Log "Page file: Managed (16GB+ RAM detected)"
     call :AddToSummary "Page file optimized for %RAM_GB%GB RAM"
 ) else if %RAM_GB% GEQ 8 (
-    echo     System RAM: %RAM_GB%GB - Setting fixed page file (4GB)
+    echo     System RAM: %RAM_GB%GB - Setting fixed page file ^(4GB^)
     REM Win32_PageFileSetting may not exist when automatic management is enabled; set via CIM + registry for reliability.
     "%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command "$cs = Get-CimInstance Win32_ComputerSystem; $cs | Set-CimInstance -Property @{AutomaticManagedPagefile=$false}; Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' -Name PagingFiles -Value @(($env:SystemDrive + '\pagefile.sys 4096 4096'))" >nul 2>&1
     if errorlevel 1 call :Log "Warning: Failed setting fixed page file size"

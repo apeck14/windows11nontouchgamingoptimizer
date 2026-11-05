@@ -137,6 +137,15 @@ class Regressions(unittest.TestCase):
                 prelude='set "DVR_PREF_SET="\ncall :Seed\n', env={'CHOICE_CODE': str(selection)})
             self.assertIn(f'DVR={int(selection == 1)}', result.stdout)
 
+    def test_memory_and_pagefile_routines_complete_for_all_ram_ranges(self):
+        for name in ['OptimizeMemory', 'OptimizePageFile']:
+            for ram in ['4', '8', '32']:
+                with self.subTest(routine=name, ram=ram):
+                    result, trace, _ = self.run_batch(mock_commands(routine(name)), name,
+                        extra=LOG + MOCK + stub('AddToSummary'), env={'RAM_GB': ram})
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn('powershell', trace)
+
     def test_laptop_detection_and_cancellation(self):
         body = routine('DetectChassisType')
         body = re.sub(r'^for /f [^\n]+',
