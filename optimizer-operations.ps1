@@ -38,7 +38,7 @@ function Get-ArgumentValue {
 
 function Invoke-NativeOperation {
     param([string]$Program, [string[]]$Arguments)
-    $allowed = @('reg', 'sc', 'schtasks', 'powercfg', 'netsh', 'bcdedit', 'fsutil', 'dism')
+    $allowed = @('reg', 'sc', 'schtasks', 'powercfg', 'netsh', 'bcdedit', 'fsutil')
     $name = [IO.Path]::GetFileNameWithoutExtension($Program).ToLowerInvariant()
     if ($name -notin $allowed) { throw "Native program is not allowed: $Program" }
     $path = Join-Path $env:SystemRoot "System32\$name.exe"
@@ -170,33 +170,6 @@ function Invoke-FeatureChange {
     Write-OperationResult Applied "Feature $Name" $wanted $true
 }
 
-function Invoke-AppRemoval {
-    param([string]$Name)
-    $failed = $false
-    # Preserve existing effective scope: current account plus provisioning.
-    # Each scope has an independent result; enumeration failure is never absence.
-    try {
-        $packages = @(Get-AppxPackage -Name $Name -ErrorAction Stop)
-        if (-not $packages.Count) { Write-OperationResult AlreadyConfigured "App $Name (current user)" 'Not installed.' $true }
-        elseif (@($packages | Where-Object NonRemovable).Count) { Write-OperationResult Unsupported "App $Name (current user)" 'Windows marks this package non-removable.' }
-        else {
-            foreach ($package in $packages) { Remove-AppxPackage -Package $package.PackageFullName -ErrorAction Stop }
-            if (@(Get-AppxPackage -Name $Name -ErrorAction Stop).Count) { throw 'Package remains registered after removal.' }
-            Write-OperationResult Applied "App $Name (current user)" 'Removal verified.' $true
-        }
-    } catch { $failed = $true; Write-OperationResult Failed "App $Name (current user)" $_.Exception.Message }
-    try {
-        $packages = @(Get-AppxProvisionedPackage -Online -ErrorAction Stop | Where-Object DisplayName -EQ $Name)
-        if (-not $packages.Count) { Write-OperationResult AlreadyConfigured "App $Name (provisioning)" 'Not provisioned.' $true }
-        else {
-            foreach ($package in $packages) { Remove-AppxProvisionedPackage -Online -PackageName $package.PackageName -ErrorAction Stop | Out-Null }
-            if (@(Get-AppxProvisionedPackage -Online -ErrorAction Stop | Where-Object DisplayName -EQ $Name).Count) { throw 'Package remains provisioned after removal.' }
-            Write-OperationResult Applied "App $Name (provisioning)" 'Removal verified for future users.' $true
-        }
-    } catch { $failed = $true; Write-OperationResult Failed "App $Name (provisioning)" $_.Exception.Message }
-    return -not $failed
-}
-
 function Invoke-MemoryChange {
     param([string]$Property, [bool]$Wanted)
     $before = Get-MMAgent -ErrorAction Stop
@@ -266,13 +239,6 @@ function Get-PowerCapabilities {
 
 function Get-ACPowerMode { Initialize-PowerApi; [OptimizerPower]::ReadACMode() }
 function Set-ACPowerMode([guid]$Mode) { Initialize-PowerApi; [OptimizerPower]::SetACMode($Mode) }
-
-function Invoke-HibernationCleanup {
-    $caps = Get-PowerCapabilities
-    if ($caps.Portable -or $caps.ModernStandby) {
-        Write-OperationResult AlreadyConfigured 'Hibernation' 'Preserved on portable/Modern Standby hardware; no change requested.'
-    } else { Invoke-GenericChange @('powercfg','/h','off') }
-}
 
 function Invoke-PerformancePlan {
     $caps = Get-PowerCapabilities
@@ -537,9 +503,6 @@ function Get-NativeDesiredState {
 function Invoke-GenericChange {
     param([string[]]$Tokens)
     $name = [IO.Path]::GetFileNameWithoutExtension($Tokens[0]).ToLowerInvariant()
-    if ($name -eq 'dism' -and (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending')) {
-        Write-OperationResult RestartRequired ($Tokens -join ' ') 'Deferred: Windows servicing has pending operations. Restart before retrying.'; return
-    }
     $before = Get-NativeDesiredState $Tokens
     if ($before -eq $true) { Write-OperationResult AlreadyConfigured ($Tokens -join ' ') 'Requested state verified.' $true; return }
     $result = Invoke-NativeOperation $Tokens[0] $Tokens[1..($Tokens.Count-1)]
@@ -581,11 +544,11 @@ function Invoke-Operation {
             Service { Invoke-ServiceChange $tokens[1..($tokens.Count-1)] }
             Task { Invoke-TaskChange $tokens[1..($tokens.Count-1)] }
             Feature { Invoke-FeatureChange $tokens[1] $tokens[2] }
-            Appx { if (-not (Invoke-AppRemoval $tokens[1])) { return 1 } }
+            Apps { . (Join-Path $PSScriptRoot 'optimizer-cleanup.ps1'); Show-AppInventory }
+            Cleanup { . (Join-Path $PSScriptRoot 'optimizer-cleanup.ps1'); Invoke-RecycleCleanup $tokens[1] }
             Memory { Invoke-MemoryChange $tokens[1] ($tokens[2] -eq '1') }
             Pagefile { Invoke-PagefileChange $tokens[1] }
             Plan { Invoke-PerformancePlan }
-            Hibernation { Invoke-HibernationCleanup }
             Restore { New-OptimizerRestorePoint }
             Windowed { Enable-WindowedOptimizations }
             Integrity { Set-MemoryIntegrity ($tokens[1] -eq 'On') }

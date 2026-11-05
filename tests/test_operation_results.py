@@ -73,25 +73,6 @@ if($script:invocations -ne 1){throw 'Unsupported or already configured feature w
 ''')
         self.assertEqual([r['Status'] for r in rows], ['Unsupported','AlreadyConfigured','AlreadyConfigured','RestartRequired','Failed'])
 
-    def test_app_enumeration_error_is_not_absence(self):
-        rows, _ = self.run_case(r'''
-function Get-AppxPackage {param($Name,$ErrorAction) @()}
-function Get-AppxProvisionedPackage {param([switch]$Online,$ErrorAction) throw 'Access is denied.'}
-if ((Invoke-Operation 'Appx Example.App') -ne 1) {throw 'App removal failure returned success'}
-''')
-        self.assertEqual([r['Status'] for r in rows], ['AlreadyConfigured','Failed'])
-        self.assertIn('provisioning', rows[1]['Operation'])
-
-    def test_app_absence_returns_success_without_removal(self):
-        rows, _ = self.run_case(r'''
-function Get-AppxPackage {param($Name,$ErrorAction) @()}
-function Get-AppxProvisionedPackage {param([switch]$Online,$ErrorAction) @()}
-function Remove-AppxPackage {throw 'Absent app must not be removed'}
-function Remove-AppxProvisionedPackage {throw 'Absent app must not be removed'}
-if ((Invoke-Operation 'Appx Example.App') -ne 0) {throw 'Absent app returned failure'}
-''')
-        self.assertEqual([r['Status'] for r in rows], ['AlreadyConfigured','AlreadyConfigured'])
-
     def test_missing_executable_cannot_reuse_a_success_exit_code(self):
         rows, _ = self.run_case(r'''
 function Test-Path {param($LiteralPath,$PathType) $false}
@@ -201,15 +182,6 @@ $null=Invoke-Operation 'Plan Ultimate'
         self.assertEqual([r['Status'] for r in rows], ['Applied','Applied'])
         self.assertTrue(all(r['Verified'] for r in rows))
 
-    def test_pending_servicing_defers_dism_without_running_it(self):
-        rows, _ = self.run_case(r'''
-function Test-Path {param($Path) if($Path -like '*RebootPending'){return $true}; throw 'Unexpected path query'}
-function Invoke-NativeOperation {throw 'DISM must not run when servicing is pending'}
-$null=Invoke-Operation 'Native dism /Online /Cleanup-Image /StartComponentCleanup'
-''')
-        self.assertEqual([r['Status'] for r in rows], ['RestartRequired'])
-        self.assertIn('Deferred', rows[0]['Detail'])
-
     def test_pagefile_already_managed_does_not_write(self):
         rows, _ = self.run_case(r'''
 function Get-CimInstance {param($ClassName,$ErrorAction) [pscustomobject]@{AutomaticManagedPagefile=$true}}
@@ -244,23 +216,6 @@ $script:acMode=[guid]::Empty; $script:apply=$false
 $null=Invoke-Operation 'Plan Ultimate'
 ''')
         self.assertEqual([r['Status'] for r in rows], ['Applied','AlreadyConfigured','Failed'])
-
-    def test_hibernation_preserved_for_portables_and_modern_standby(self):
-        rows, _ = self.run_case(r'''
-$script:portable=$true; $script:acModern=$false
-function Get-PowerCapabilities {@{Portable=$script:portable;ModernStandby=$script:acModern}}
-function Invoke-GenericChange {param($Tokens)
-    if($script:portable -or $script:acModern){throw 'Hibernation must be preserved'}
-    Write-OperationResult Applied 'Desktop hibernation' ($Tokens -join ' ')
-}
-$null=Invoke-Operation 'Hibernation Cleanup'
-$script:portable=$false; $script:acModern=$true
-$null=Invoke-Operation 'Hibernation Cleanup'
-$script:acModern=$false
-$null=Invoke-Operation 'Hibernation Cleanup'
-''')
-        self.assertEqual([r['Status'] for r in rows], ['AlreadyConfigured','AlreadyConfigured','Applied'])
-        self.assertEqual(rows[2]['Detail'], 'powercfg /h off')
 
     def test_pagefile_enables_auto_and_checks_readback(self):
         rows, _ = self.run_case(r'''
@@ -326,6 +281,62 @@ $null=Invoke-Operation 'Restore Create'
 ''')
         self.assertEqual(rows[0]['Status'], 'Failed')
         self.assertIn('disabled by policy', rows[0]['Detail'])
+
+    def test_cleanup_candidates_are_old_allowed_files_only(self):
+        self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$root=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'temp'
+$null=New-Item -ItemType Directory $root
+foreach($name in @('old.tmp','recent.tmp','old.exe')) {
+    $path=Join-Path $root $name
+    [IO.File]::WriteAllText($path,'fixture')
+    if($name -ne 'recent.tmp'){(Get-Item $path).LastWriteTime=(Get-Date).AddDays(-40)}
+}
+function Get-CleanupRoots {param($Scope) [pscustomobject]@{Path=$root;Category='Fixture';Days=30;Extensions=@('.tmp')}}
+$files=@(Get-CleanupCandidates Safe)
+if($files.Count -ne 1 -or (Split-Path $files[0].Path -Leaf) -ne 'old.tmp'){throw 'Incorrect candidate selection'}
+if(Test-CleanupPath $env:SystemRoot){throw 'Windows directory accepted'}
+$env:OneDrive=$root
+if(Test-CleanupPath (Join-Path $root 'old.tmp')){throw 'Cloud directory accepted'}
+''')
+
+    def test_cleanup_skips_changed_files_and_never_falls_back_after_failure(self):
+        rows, _ = self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$path=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'file.tmp'
+[IO.File]::WriteAllText($path,'fixture')
+$script:stamp=(Get-Item $path).LastWriteTime; $script:bytes=7; $script:recycles=0
+function Get-CleanupCandidates {param($Scope) [pscustomobject]@{Path=$path;Modified=$script:stamp;Bytes=$script:bytes}}
+function Move-CleanupFileToRecycleBin {param($Path) $script:recycles++; throw 'Cannot recycle'}
+try { Invoke-RecycleCleanup Safe } catch { Write-OperationResult Failed 'Cleanup Safe' $_.Exception.Message }
+# No permanent deletion is available.
+if(-not (Test-Path $path) -or $script:recycles -ne 1){throw 'Unsafe failure handling'}
+$script:bytes=999
+try { Invoke-RecycleCleanup Safe } catch { Write-OperationResult Failed 'Cleanup Safe' $_.Exception.Message }
+if($script:recycles -ne 1){throw 'Changed file was recycled'}
+''')
+        self.assertTrue(all(r['Status'] == 'Failed' for r in rows))
+        self.assertTrue(any('changed after scanning' in r['Detail'] for r in rows))
+
+    def test_deep_cleanup_cancel_does_not_recycle(self):
+        rows, _ = self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$script:inventoryShown=$false
+function Get-CleanupCandidates {param($Scope) [pscustomobject]@{Path='example.zip';Modified=(Get-Date);Bytes=7}}
+function Show-AppInventory {$script:inventoryShown=$true}
+function Out-GridView {param($Title,[switch]$PassThru)}
+function Move-CleanupFileToRecycleBin {throw 'Cancellation must not recycle'}
+Invoke-RecycleCleanup Deep
+if(-not $script:inventoryShown){throw 'App inventory was not shown'}
+''')
+        self.assertEqual(rows[0]['Status'], 'AlreadyConfigured')
+
+    def test_recycle_api_compiles_without_touching_files(self):
+        self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+Initialize-RecycleApi
+if(-not ('OptimizerRecycle' -as [type])){throw 'Recycle API did not compile'}
+''')
 
     def test_windowed_flag_preserves_other_graphics_preferences(self):
         rows, _ = self.run_case(r'''

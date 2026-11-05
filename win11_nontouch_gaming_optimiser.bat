@@ -30,7 +30,7 @@ if defined ESC (
 :: by Matt Hurley
 ::
 :: Menu-driven utility focused on:
-::   - Removing bloatware and touch/pen components
+::   - Reviewing apps and disabling optional touch/pen components
 ::   - Maximizing gaming FPS and responsiveness  
 ::   - Optimizing network latency and throughput
 ::   - Reducing RAM/CPU usage from background services
@@ -40,6 +40,10 @@ if defined ESC (
 set "POWERSHELL=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 
 set "OPERATIONS_SCRIPT=%SCRIPT_DIR%optimizer-operations.ps1"
+if not exist "%SCRIPT_DIR%optimizer-cleanup.ps1" (
+    echo [!] Missing optimizer-cleanup.ps1. Extract the complete repository ZIP.
+    exit /b 1
+)
 if not exist "%OPERATIONS_SCRIPT%" (
     echo [!] Missing optimizer-operations.ps1. Download and extract the complete repository ZIP.
     exit /b 1
@@ -91,18 +95,19 @@ echo    %CLR_MENU%[2]%CLR_RESET% RECOMMENDED - Core essentials only (faster)
 echo.
 echo    %CLR_MENU%[3]%CLR_RESET% Set up protection and create restore point
 echo    %CLR_MENU%[R]%CLR_RESET% Open Windows System Restore
-echo    %CLR_MENU%[4]%CLR_RESET% Debloat Windows 11 (remove consumer/OEM apps)
+echo    %CLR_MENU%[4]%CLR_RESET% Review installed apps (no uninstall)
 echo    %CLR_MENU%[5]%CLR_RESET% Disable touchscreen, pen, and ink features
 echo    %CLR_MENU%[6]%CLR_RESET% Gaming settings - includes memory integrity OFF
 echo    %CLR_MENU%[7]%CLR_RESET% Optimize services, telemetry, and indexing
 echo    %CLR_MENU%[8]%CLR_RESET% Network optimizations (apply/revert)
 echo    %CLR_MENU%[9]%CLR_RESET% Disable animations and visual effects
 echo    %CLR_MENU%[A]%CLR_RESET% Optimize startup programs and services
-echo    %CLR_MENU%[B]%CLR_RESET% Free disk space and clear temp files
+echo    %CLR_MENU%[B]%CLR_RESET% Recycle user temporary files older than 30 days
 echo    %CLR_MENU%[C]%CLR_RESET% Advanced: GPU and storage optimizations
 echo    %CLR_MENU%[D]%CLR_RESET% Advanced: Audio latency reduction
 echo    %CLR_MENU%[E]%CLR_RESET% Optional: Disable Xbox services (breaks Game Bar)
 echo.
+echo    %CLR_MENU%[J]%CLR_RESET% Deeper cleanup - select files to recycle
 echo    %CLR_MENU%[G]%CLR_RESET% Check display refresh and GPU preferences
 echo    %CLR_MENU%[M]%CLR_RESET% Memory integrity on/off
 echo    %CLR_MENU%[H]%CLR_RESET% Help / README
@@ -130,6 +135,7 @@ if /I "%choice%"=="B" (call :FreeDiskSpace & call :PauseReturn & goto Menu)
 if /I "%choice%"=="C" (call :AdvancedGPUStorage & call :PauseReturn & goto Menu)
 if /I "%choice%"=="D" (call :OptimizeAudio & call :PauseReturn & goto Menu)
 if /I "%choice%"=="E" (call :DisableXboxServices & call :PauseReturn & goto Menu)
+if /I "%choice%"=="J" (call :RunOperation Cleanup Deep & call :PauseReturn & goto Menu)
 if /I "%choice%"=="G" (call :RunOperation Graphics Check & call :PauseReturn & goto Menu)
 if /I "%choice%"=="M" (call :MemoryIntegrityMenu & call :PauseReturn & goto Menu)
 if /I "%choice%"=="H" (call :ShowHelp & call :PauseReturn & goto Menu)
@@ -157,7 +163,7 @@ if errorlevel 1 exit /b 1
 call :PrepareOptimization
 if errorlevel 1 exit /b 1
 echo.
-echo [*] Step 1/15: Removing consumer apps...
+echo [*] Step 1/15: Reviewing installed apps...
 call :Debloat
 echo [*] Step 2/15: Disabling touch/pen components...
 call :DisableTouchFeatures
@@ -171,7 +177,7 @@ echo [*] Step 6/15: Optimizing visual effects...
 call :DisableAnimations
 echo [*] Step 7/15: Optimizing startup...
 call :OptimizeStartup
-echo [*] Step 8/15: Freeing disk space...
+echo [*] Step 8/15: Recycling old temporary files...
 call :FreeDiskSpace
 echo [*] Step 9/15: GPU and storage optimizations...
 set "AUTO_ADVANCED_CONFIRM=1"
@@ -212,7 +218,7 @@ if errorlevel 1 exit /b 1
 call :PrepareOptimization
 if errorlevel 1 exit /b 1
 echo.
-echo [*] Step 1/7: Removing consumer apps...
+echo [*] Step 1/7: Reviewing installed apps...
 call :Debloat
 echo [*] Step 2/7: Applying gaming tweaks...
 call :ApplyGamingTweaks
@@ -296,51 +302,8 @@ echo     Log: %LOG_FILE%
 exit /b 0
 
 :Debloat
-call :BackupRegistryKeys
-call :Log "Starting debloat routine"
-echo.
-echo ========================================================================
-echo   %CLR_TITLE%DEBLOATING WINDOWS 11%CLR_RESET%
-echo ========================================================================
-echo.
-echo [*] Removing consumer and OEM bloat (safe set). This may take a minute...
-for %%A in (
-    Clipchamp.Clipchamp
-    Microsoft.BingNews
-    Microsoft.BingFinance
-    Microsoft.BingWeather
-    Microsoft.GetHelp
-    Microsoft.Getstarted
-    Microsoft.Microsoft3DViewer
-    Microsoft.MicrosoftOfficeHub
-    Microsoft.MicrosoftSolitaireCollection
-    Microsoft.MixedReality.Portal
-    Microsoft.People
-    Microsoft.PowerAutomateDesktop
-    Microsoft.SkypeApp
-    Microsoft.WindowsFeedbackHub
-    Microsoft.ZuneMusic
-    Microsoft.ZuneVideo
-    MicrosoftWindows.Client.WebExperience
-    Microsoft.YourPhone
-    BytedancePte.Ltd.TikTok
-    Facebook.Facebook
-    Disney.37853FC22B2CE
-    Microsoft.WindowsAlarms
-    Microsoft.WindowsMaps
-    Microsoft.WindowsSoundRecorder
-    Microsoft.Whiteboard
-    Microsoft.MixedReality.Portal
-) do (
-    call :RemoveApp %%A
-)
-call :Log "Debloat: Spotify, Game Bar and Xbox app preserved"
-echo [*] Preserving Spotify and Xbox/Game Bar components.
-call :Log "Debloat attempts finished; see per-app results"
-echo.
-echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
-echo     Log: %LOG_FILE%
-exit /b 0
+call :RunOperation Apps Review
+exit /b %errorlevel%
 
 :DisableTouchFeatures
 call :Log "Disabling touch/pen stack"
@@ -707,24 +670,9 @@ echo     Log: %LOG_FILE%
 exit /b 0
 
 :FreeDiskSpace
-call :Log "Freeing disk space"
-echo.
-echo ========================================================================
-echo   %CLR_TITLE%FREEING DISK SPACE%CLR_RESET%
-echo ========================================================================
-echo.
-echo [*] Clearing temporary files and reclaiming disk space...
-call :RunOperation Hibernation Cleanup
-call :ClearTemp "%TEMP%"
-if defined LOCALAPPDATA call :ClearTemp "%LOCALAPPDATA%\Temp"
-call :ClearTemp "%SystemRoot%\Temp"
-call :ClearUpdateCache
-call :RunOperation Native dism /Online /Cleanup-Image /StartComponentCleanup
-call :Log "Disk cleanup attempts finished; see results"
-echo.
-echo [*] Attempts finished. Review the operation results for confirmed changes and failures.
-echo     Log: %LOG_FILE%
-exit /b 0
+call :Log "Recycling old user temporary files"
+call :RunOperation Cleanup Safe
+exit /b %errorlevel%
 
 :OptimizeMemory
 call :Log "Optimizing memory"
@@ -742,48 +690,6 @@ call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\Sessi
 call :RunOperation Registry reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" /v ClearPageFileAtShutdown /t REG_DWORD /d 0 /f
 call :Log "Memory changes attempted; see results"
 exit /b 0
-
-:ClearTemp
-setlocal
-set "OPTIMIZER_CLEANUP_MODE=temp"
-set "OPTIMIZER_CLEANUP_TARGET=%~1"
-call :ClearDirectory
-endlocal & exit /b %errorlevel%
-
-:ClearUpdateCache
-setlocal
-set "OPTIMIZER_CLEANUP_MODE=update"
-set "OPTIMIZER_CLEANUP_TARGET=%SystemRoot%\SoftwareDistribution\Download"
-call :ClearDirectory
-endlocal & exit /b %errorlevel%
-
-:ClearDirectory
-if not defined OPTIMIZER_CLEANUP_TARGET exit /b 0
-call :Log "Clearing %OPTIMIZER_CLEANUP_TARGET%"
-REM Accept configured temp paths but reject roots, profile/system folders and ancestors.
-REM Skip reparse points and never recursively follow a junction or symlink.
-REM Update-cache cleanup waits for both services to stop and restores running services.
-"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -Command ^
- "$ErrorActionPreference='Stop'; $restart=@(); $script:cleanupFailures=0; try { try {" ^
- "function Full-Path([string]$path){if(-not [IO.Path]::IsPathRooted($path)){throw 'Cleanup path must be absolute'}; [IO.Path]::GetFullPath($path).TrimEnd('\')};" ^
- "$target=Full-Path $env:OPTIMIZER_CLEANUP_TARGET; $cache=Full-Path (Join-Path $env:SystemRoot 'SoftwareDistribution\Download');" ^
- "$allowed=@(); if($env:OPTIMIZER_CLEANUP_MODE -eq 'update'){$allowed=@($cache)} elseif($env:OPTIMIZER_CLEANUP_MODE -eq 'temp'){if($env:LOCALAPPDATA){$allowed += Full-Path (Join-Path $env:LOCALAPPDATA 'Temp')}; $allowed += Full-Path (Join-Path $env:SystemRoot 'Temp'); if($env:TEMP){$allowed += Full-Path $env:TEMP}} else {throw 'Unknown cleanup mode'};" ^
- "if($target -notin $allowed){throw 'Refusing unapproved cleanup directory'}; if($target -eq [IO.Path]::GetPathRoot($target).TrimEnd('\')){throw 'Refusing drive root'};" ^
- "$protected=@($env:USERPROFILE,$env:PUBLIC,$env:LOCALAPPDATA,$env:APPDATA,$env:ProgramData,$env:SystemRoot,$env:ProgramFiles,${env:ProgramFiles(x86)}); foreach($path in $protected){if($path){$full=Full-Path $path; if($full -eq $target -or $full.StartsWith($target+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Refusing protected directory or ancestor'}}};" ^
- "if($env:OPTIMIZER_CLEANUP_MODE -eq 'temp' -and $target -eq $cache){throw 'Update cache requires service coordination'};" ^
- "if($env:OPTIMIZER_CLEANUP_MODE -eq 'temp' -and $target -ne (Full-Path (Join-Path $env:SystemRoot 'Temp'))){foreach($tree in @($env:SystemRoot,$env:ProgramFiles,${env:ProgramFiles(x86)})){if($tree -and $target.StartsWith((Full-Path $tree)+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Refusing cleanup inside system or application directory'}}};" ^
- "if(-not (Test-Path -LiteralPath $target)){exit 0}; $dir=Get-Item -LiteralPath $target -Force; if(-not $dir.PSIsContainer){throw 'Target is not a directory'};" ^
- "for($ancestor=$dir; $null -ne $ancestor; $ancestor=$ancestor.Parent){if($ancestor.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Refusing reparse point in cleanup path'}};" ^
- "if($env:OPTIMIZER_CLEANUP_MODE -eq 'update'){$services=@(Get-Service -Name wuauserv,bits); if($services.Count -ne 2){throw 'Update services not found'}; foreach($svc in $services){if($svc.Status -notin @('Running','Stopped')){throw 'Update service is changing state; retry later'}}; $restart=@($services | Where-Object {$_.Status -eq 'Running'}); foreach($svc in $restart){Stop-Service -InputObject $svc -NoWait -ErrorAction Stop; $svc.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(20))}; foreach($svc in $services){$svc.Refresh(); if($svc.Status -ne 'Stopped'){throw 'Update service has not stopped'}}};" ^
- "function Clear-TempDirectory([string]$path){foreach($item in Get-ChildItem -LiteralPath $path -Force){if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){continue}; if($item.PSIsContainer){Clear-TempDirectory $item.FullName; if(@(Get-ChildItem -LiteralPath $item.FullName -Force).Count -ne 0){continue}}; try {Remove-Item -LiteralPath $item.FullName -Force -ErrorAction Stop} catch {$script:cleanupFailures++; Write-Warning $_}}}; Clear-TempDirectory $target" ^
- "} finally {$restoreFailed=$false; foreach($svc in $restart){try {Start-Service -InputObject $svc -ErrorAction Stop} catch {$restoreFailed=$true; Write-Warning $_}}; if($restoreFailed){throw 'Could not restore an update service; inspect the log'}}; if($script:cleanupFailures -gt 0){exit 2}; exit 0 } catch {Write-Warning $_; exit 1}" >> "%LOG_FILE%" 2>&1
-set "CLEANUP_RESULT=%errorlevel%"
-if "%CLEANUP_RESULT%"=="0" (
-    call :RecordOperation Applied "Cleanup %OPTIMIZER_CLEANUP_TARGET%" "Traversal completed; skipped reparse points. See log for details." "1"
-) else (
-    call :RecordOperation Failed "Cleanup %OPTIMIZER_CLEANUP_TARGET%" "Partial or failed cleanup; some files may have been removed. See log."
-)
-exit /b %CLEANUP_RESULT%
 
 :OptimizePageFile
 call :Log "Enabling system-managed page file"
@@ -953,7 +859,7 @@ exit /b 0
 :ShowHelp
 echo.
 echo Full and Recommended attempt a restore point before making changes.
-echo Individual actions do not create a restore point automatically.
+echo Individual actions do not create a restore point automatically. File cleanup only recycles.
 echo Review [P] Operation results for failures and restart requirements.
 echo [V] checks selected live settings; it is not a performance score.
 echo Spotify is preserved. Xbox services change only if you choose [E].
@@ -1025,11 +931,6 @@ echo.
 echo [*] Partial rollback attempted. Check the log; this is not a complete restore.
 echo     Check %LOG_FILE% for details. %CLR_WARNING%Restart recommended.%CLR_RESET%
 exit /b 0
-
-:RemoveApp
-if "%~1"=="" exit /b 0
-call :RunOperation Appx "%~1"
-exit /b %errorlevel%
 
 :DetectOS
 set "OS_CAPTION=Windows"
