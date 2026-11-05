@@ -68,6 +68,7 @@ function Write-OperationResult {
     $message = '[{0}] {1}: {2}' -f $Status.ToUpperInvariant(), $Operation, $Detail
     if ($env:LOG_FILE) { Add-Content -LiteralPath $env:LOG_FILE -Value $message -Encoding UTF8 }
     if ($Status -eq 'Failed') {
+        $script:OperationFailed = $true
         $label = switch -Regex ($Operation) {
             '^Service (?:sc (?:stop|start|config) )?"?([^"\s]+)' { 'Service '+$Matches[1]; break }
             '^Recycle ' { 'Recycle '+[IO.Path]::GetFileName($Operation.Substring(8)); break }
@@ -683,6 +684,7 @@ function Show-OperationSummary {
 
 function Invoke-Operation {
     param([string]$Text)
+    $script:OperationFailed = $false
     $tokens = @(Split-OperationArguments $Text)
     $label = $Text
     try {
@@ -712,7 +714,7 @@ function Invoke-Operation {
             default { throw 'Unknown operation kind.' }
         }
     } catch { Write-OperationResult Failed $label $_.Exception.Message; return 1 }
-    return 0
+    return [int]$script:OperationFailed
 }
 
 function Invoke-OperationWithProgress {

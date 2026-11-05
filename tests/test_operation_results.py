@@ -400,6 +400,25 @@ if($script:plans.Count -ne 2 -or $script:plans.Id -notcontains $c){throw 'Custom
 ''')
         self.assertEqual([r['Status'] for r in rows], ['AlreadyConfigured','Applied','AlreadyConfigured'])
 
+    def test_failed_plan_creation_returns_failure_even_when_fallback_succeeds(self):
+        rows, _ = self.run_case(r'''
+function Test-ManagedCoreParking {$false}
+function Get-PowerCapabilities {@{ModernStandby=$false;Portable=$false}}
+function Get-PerformancePlans {}
+$script:active=[guid]'381b4222-f694-41f0-9685-ff5bb260df2e'
+function Get-ActivePowerScheme {$script:active}
+function Invoke-NativeOperation {param($Program,$Arguments)
+    if($Arguments[0] -eq '-duplicatescheme'){return [pscustomobject]@{Code=5;Output='Creation denied'}}
+    if($Arguments[0] -ne '-setactive' -or $Arguments[1] -ne 'SCHEME_MIN'){throw 'Unexpected mutation'}
+    $script:active=[guid]'8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c'
+    [pscustomobject]@{Code=0;Output=''}
+}
+if((Invoke-Operation 'Plan Ultimate') -ne 1){throw 'Recorded failure incorrectly returned success'}
+if($script:active -ne [guid]'8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c'){throw 'Fallback did not apply'}
+if((Invoke-Operation 'Native powercfg -setactive SCHEME_MIN') -ne 0){throw 'Previous failure leaked into next operation'}
+''')
+        self.assertEqual([r['Status'] for r in rows], ['Failed', 'Applied', 'AlreadyConfigured'])
+
     def test_power_plan_is_created_only_when_missing(self):
         rows, _ = self.run_case(r'''
 function Test-ManagedCoreParking {$false}

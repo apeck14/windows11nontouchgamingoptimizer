@@ -31,6 +31,7 @@ class FakeDriver {
     [int]$Saves=0
     [bool]$SilentFailure=$false
     [bool]$FailSave=$false
+    [int]$FailSaveNumber=0
     FakeDriver() {
         $this.State[0x00A879CF]=@{Data=1;UserOverride=$true}
         $this.State[0x10835002]=@{Data=60;UserOverride=$false}
@@ -49,7 +50,7 @@ class FakeDriver {
         $value=if($id -eq 0x10835002){60}elseif($id -eq 0x1057EB71){5}else{0}
         $this.Cache[$id]=@{Data=$value;UserOverride=$false}
     }
-    [void] Save() { $this.Saves++; if($this.FailSave){throw 'Save failed'}; $this.State=$this.Cache.Clone() }
+    [void] Save() { $this.Saves++; if($this.FailSave -or $this.Saves -eq $this.FailSaveNumber){throw 'Save failed'}; $this.State=$this.Cache.Clone() }
     [void] Reload() { $this.Cache=$this.State.Clone() }
     [void] Dispose() {}
 }
@@ -236,6 +237,63 @@ $failed=$false
 try {Invoke-Mw4Optimization} catch {$failed=$true}
 if(-not $failed -or [IO.File]::ReadAllText($path) -cne $text){throw 'Changed config without backup'}
 ''')
+
+    def test_manifest_write_failure_blocks_both_file_and_driver_changes(self):
+        self.run_case(DRIVER+r'''
+$path=Join-Path $root 's.1.0.cod26.txt'
+$text='WeaponMotionBlur@0;1;1 = true'
+[IO.File]::WriteAllText($path,$text)
+function Set-Content {throw 'Manifest write denied'}
+$message=''
+try {Invoke-Mw4Optimization} catch {$message=$_.Exception.Message}
+if($message -ne 'Manifest write denied'){throw 'Manifest failure was swallowed'}
+if([IO.File]::ReadAllText($path) -cne $text -or $driver.Writes -or $driver.Saves){throw 'Applied changes without a restorable manifest'}
+''')
+
+    def test_corrupt_backup_is_rejected_without_blocking_other_file_restore(self):
+        rows = self.run_case(r'''
+$text='WeaponMotionBlur@0;1;1 = true'
+foreach($name in @('s.1.0.cod26.txt0','s.1.0.cod26.txt1')) {[IO.File]::WriteAllText((Join-Path $root $name),$text)}
+Invoke-Mw4Optimization
+$backup=Get-ChildItem -LiteralPath (Get-Mw4BackupRoot) -Directory | Select-Object -First 1
+$manifest=Get-Content -LiteralPath (Join-Path $backup.FullName 'manifest.json') -Raw | ConvertFrom-Json
+[IO.File]::WriteAllText((Join-Path $backup.FullName $manifest.Files[0].Backup),'corrupt backup')
+Restore-Mw4Optimization
+if([IO.File]::ReadAllText($manifest.Files[0].Path) -cne $text.Replace('true','false')){throw 'Corrupt backup overwrote config'}
+if([IO.File]::ReadAllText($manifest.Files[1].Path) -cne $text){throw 'Valid backup was not restored'}
+''')
+        self.assertEqual([r['Status'] for r in rows], ['Applied', 'Applied', 'Failed', 'Applied'])
+        self.assertIn('integrity check failed', rows[2]['Detail'])
+
+    def test_invalid_utf8_is_preserved_without_creating_a_backup(self):
+        rows = self.run_case(r'''
+$path=Join-Path $root 's.1.0.cod26.txt'
+[byte[]]$bytes=[Text.Encoding]::UTF8.GetBytes("WeaponMotionBlur@0;1;1 = true`n") + @(0xC3,0x28)
+[IO.File]::WriteAllBytes($path,$bytes)
+Invoke-Mw4Optimization
+if((Get-Mw4Hash ([IO.File]::ReadAllBytes($path))) -ne (Get-Mw4Hash $bytes)){throw 'Invalid encoding was rewritten'}
+if(Test-Path -LiteralPath (Get-Mw4BackupRoot)){throw 'Invalid config created a backup'}
+''')
+        self.assertEqual([r['Status'] for r in rows], ['Failed'])
+
+    def test_failed_driver_save_never_leaks_into_a_later_successful_save(self):
+        for failure in range(1, 5):
+            with self.subTest(failed_save=failure):
+                rows = self.run_case(DRIVER+f'\n$driver.FailSaveNumber={failure}\n'+r'''
+[IO.File]::WriteAllText((Join-Path $root 's.1.0.cod26.txt'),'1')
+$before=$driver.State.Clone()
+$ids=@(0x00A879CF,0x10835002,0x0064B541,0x1057EB71)
+Invoke-Mw4Optimization
+$failedId=$ids[$driver.FailSaveNumber-1]
+if($driver.State[$failedId].Data -ne $before[$failedId].Data -or $driver.State[$failedId].UserOverride -ne $before[$failedId].UserOverride){throw 'Failed write leaked into another save'}
+if($driver.Saves -ne 4){throw 'Independent driver changes stopped after one failed save'}
+Restore-Mw4Optimization
+foreach($id in $ids) {
+    if($driver.State[$id].Data -ne $before[$id].Data -or $driver.State[$id].UserOverride -ne $before[$id].UserOverride){throw 'Partial apply did not restore original driver state'}
+}
+''')
+                self.assertEqual(sum(r['Status'] == 'Failed' for r in rows), 1)
+                self.assertEqual(sum(r['Status'] == 'Applied' for r in rows), 6)
 
     def test_unknown_config_is_skipped_without_claiming_it_is_optimized(self):
         rows = self.run_case(r'''
