@@ -146,6 +146,9 @@ function Get-CleanupRoots([string]$Scope) {
 function Test-CleanupPath([string]$Path) {
     if (-not [IO.Path]::IsPathRooted($Path) -or $Path.StartsWith('\\')) { return $false }
     $full = [IO.Path]::GetFullPath($Path)
+    foreach ($root in @([IO.Path]::GetPathRoot($full),$env:USERPROFILE,$env:PUBLIC,$env:LOCALAPPDATA,$env:APPDATA)) {
+        if ($root -and $full.TrimEnd('\') -ieq $root.TrimEnd('\')) { return $false }
+    }
     $drive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($full))
     if ($drive.DriveType -ne 'Fixed' -or $drive.DriveFormat -ne 'NTFS') { return $false }
     $archive = Join-Path $env:ProgramData 'Microsoft\Windows\WER\ReportArchive'
@@ -186,11 +189,17 @@ function Get-CleanupCandidates([string]$Scope) {
 
 function Get-CleanupHash([string]$Path) {
     $sha = [Security.Cryptography.SHA256]::Create()
-    $stream = $null
     try {
-        $stream = [IO.File]::OpenRead($Path)
-        [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','')
-    } finally { if ($stream) { $stream.Dispose() }; $sha.Dispose() }
+        # Compare all NTFS data, including metadata/custom alternate streams.
+        $parts = @(foreach ($entry in @(Get-Item -LiteralPath $Path -Stream * -ErrorAction Stop | Sort-Object Stream)) {
+            $source = if ($entry.Stream -eq ':$DATA') { $Path } else { '\\?\'+$Path+':'+$entry.Stream }
+            $stream = [IO.File]::OpenRead($source)
+            try { $entry.Stream+':'+[BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','') }
+            finally { $stream.Dispose() }
+        })
+        if (-not $parts.Count) { throw 'No readable file streams.' }
+        [BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes(($parts -join "`0")))).Replace('-','')
+    } finally { $sha.Dispose() }
 }
 
 function Get-DuplicateDownloads {

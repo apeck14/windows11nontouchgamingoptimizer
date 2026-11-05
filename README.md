@@ -9,7 +9,7 @@ Extract the repository ZIP, keeping all three `.bat`/`.ps1` files together. Run 
 - **1/F Full:** all routines, including aggressive networking and advanced GPU/storage settings; recycles old user temp files.
 - **2 Recommended:** app inventory, gaming settings, services, safe networking, visuals and core parking.
 - **4:** installed-app inventory; no uninstall. **B:** recycle user temp files older than 30 days.
-- **J:** storage/category and largest-app-folder estimates in GB. Automatically recycles SHA-256-identical loose installer/archive downloads with matching extensions, keeping the oldest-created copy. Other old downloads, crash dumps, archived error reports (30+ days) and recordings require selection; nothing is preselected. Changed or unavailable retained copies prevent automatic recycling. Pending error reports are excluded; skipped locations are marked partial.
+- **J:** storage/category and largest-app-folder estimates in GB. Automatically recycles SHA-256-identical loose installer/archive downloads with matching extensions and alternate-stream contents, keeping the oldest-created copy. Other old downloads, crash dumps, archived error reports (30+ days) and recordings require selection; nothing is preselected. Changed or unavailable retained copies prevent automatic recycling. Pending error reports are excluded; skipped locations are marked partial.
 - **3:** set up System Protection and create a restore point. **R:** open System Restore.
 - **G:** display refresh/GPU checks. **M:** memory integrity on/off.
 - **P:** session operation results. **V:** limited live configuration checks.
@@ -40,6 +40,6 @@ Requires Windows, Windows PowerShell 5.1 (including Out-GridView for deeper clea
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-Tests mock system mutations and use disposable file fixtures. A read-only registry check verifies provider integration. They test behavior and reporting, not gaming performance.
+Tests mock system mutations and use disposable file fixtures. Set `OPTIMIZER_TEST_RECYCLE=1` to also test recycling and restoring a uniquely named generated fixture through the real Recycle Bin. A read-only registry check verifies provider integration. They test behavior and reporting, not gaming performance.
 
 [MIT license](LICENSE).

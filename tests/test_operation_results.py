@@ -229,7 +229,7 @@ $null=Invoke-Operation 'Pagefile Auto'
         self.assertEqual([r['Status'] for r in rows], ['RestartRequired','Failed'])
 
     def test_restore_creation_verifies_new_point_and_restores_frequency(self):
-        for original, outcome in [('absent','ok'), ('existing','ok'), ('existing','error'), ('absent','missing')]:
+        for original, outcome in [('absent','ok'), ('existing','ok'), ('existing','error'), ('existing','returnerror'), ('absent','missing')]:
             with self.subTest(original=original, outcome=outcome):
                 rows, _ = self.run_case(r'''
 $script:original='ORIGINAL'; $script:outcome='OUTCOME'; $script:description=''; $script:writes=@(); $script:removed=$false
@@ -247,6 +247,7 @@ function Invoke-CimMethod {param($Namespace,$ClassName,$MethodName,$Arguments,$E
     if($Arguments.EventType -ne 100 -or $Arguments.RestorePointType -ne 12){throw 'Wrong restore event'}
     $script:description=$Arguments.Description
     if($script:outcome -eq 'error'){throw 'Simulated snapshot failure'}
+    if($script:outcome -eq 'returnerror'){return [pscustomobject]@{ReturnValue=5}}
     [pscustomobject]@{ReturnValue=0}
 }
 $null=Invoke-Operation 'Restore Create'
@@ -296,6 +297,8 @@ function Get-CleanupRoots {param($Scope) [pscustomobject]@{Path=$root;Category='
 $files=@(Get-CleanupCandidates Safe)
 if($files.Count -ne 1 -or (Split-Path $files[0].Path -Leaf) -ne 'old.tmp'){throw 'Incorrect candidate selection'}
 if(Test-CleanupPath $env:SystemRoot){throw 'Windows directory accepted'}
+if(Test-CleanupPath ([IO.Path]::GetPathRoot($root))){throw 'Drive root accepted'}
+if(Test-CleanupPath $env:USERPROFILE){throw 'Profile root accepted'}
 if(Test-CleanupPath (Join-Path $root 'vanished.tmp')){throw 'Missing file accepted'}
 $env:OneDrive=$root
 if(Test-CleanupPath (Join-Path $root 'old.tmp')){throw 'Cloud directory accepted'}
@@ -418,6 +421,70 @@ if(-not (Invoke-RecycleFiles $dupes) -or $script:moved -ne 1){throw 'Duplicate n
 [IO.File]::WriteAllText((Join-Path $root 'original.zip'),'xyz')
 if((Invoke-RecycleFiles $dupes) -or $script:moved -ne 1){throw 'Changed retained copy was not protected'}
 ''')
+
+    def test_duplicate_downloads_do_not_discard_unique_alternate_streams(self):
+        self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$root=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'downloads'
+$null=New-Item -ItemType Directory $root
+foreach($name in @('first.zip','second.zip')) {[IO.File]::WriteAllText((Join-Path $root $name),'same file body')}
+Set-Content -LiteralPath (Join-Path $root 'second.zip') -Stream UniqueNotes -Value 'important unique data'
+function Get-DownloadsFolder {$root}
+if(@(Get-DuplicateDownloads).Count){throw 'Would recycle unique alternate-stream data'}
+Set-Content -LiteralPath (Join-Path $root 'first.zip') -Stream UniqueNotes -Value 'important unique data'
+if(@(Get-DuplicateDownloads).Count -ne 1){throw 'Matching alternate streams should still deduplicate'}
+''')
+
+    def test_locked_file_cannot_reach_shell_recycling(self):
+        rows, _ = self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$path=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'locked.tmp'
+[IO.File]::WriteAllText($path,'preserve me')
+$item=Get-Item $path
+$candidate=[pscustomobject]@{Path=$path;Bytes=$item.Length;Modified=$item.LastWriteTime}
+function Initialize-RecycleApi {throw 'BUG: locked file reached recycling API'}
+$handle=[IO.File]::Open($path,'Open','ReadWrite','None')
+try {if(Invoke-RecycleFiles @($candidate)){throw 'Locked file reported success'}} finally {$handle.Dispose()}
+if([IO.File]::ReadAllText($path) -ne 'preserve me'){throw 'Locked fixture changed'}
+''')
+        self.assertEqual(rows[0]['Status'], 'Failed')
+        self.assertNotIn('BUG:', rows[0]['Detail'])
+
+    @unittest.skipUnless(os.environ.get('OPTIMIZER_TEST_RECYCLE') == '1', 'Opt-in: moves and restores a generated Recycle Bin fixture')
+    def test_real_duplicate_recycling_preserves_survivor_and_reaches_recycle_bin(self):
+        rows, _ = self.run_case(r'''
+. (Join-Path (Split-Path $env:TEST_ENGINE) 'optimizer-cleanup.ps1')
+$root=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'downloads'
+$null=New-Item -ItemType Directory $root
+$id=[guid]::NewGuid().ToString('N')
+$original=Join-Path $root ('optimizer-test-original-'+$id+'.zip')
+$copy=Join-Path $root ('optimizer-test-copy-'+$id+'.zip')
+[IO.File]::WriteAllText($original,'Generated integration test content')
+[IO.File]::WriteAllText($copy,'Generated integration test content')
+Set-Content -LiteralPath $original -Stream TestNotes -Value 'fixture metadata'
+Set-Content -LiteralPath $copy -Stream TestNotes -Value 'fixture metadata'
+(Get-Item $original).CreationTimeUtc=(Get-Date).AddDays(-1)
+function Get-DownloadsFolder {$root}
+$duplicates=@(Get-DuplicateDownloads)
+if($duplicates.Count -ne 1 -or $duplicates[0].Path -ne $copy){throw 'Fixture duplicate discovery failed'}
+if(-not (Invoke-RecycleFiles $duplicates)){throw 'Real recycling failed'}
+if((Test-Path $copy) -or [IO.File]::ReadAllText($original) -ne 'Generated integration test content'){throw 'Survivor/original path assertion failed'}
+$shell=New-Object -ComObject Shell.Application
+try {
+    $name=[IO.Path]::GetFileName($copy)
+    $entry=@($shell.Namespace(10).Items() | Where-Object {$_.Name -in @($name,[IO.Path]::GetFileNameWithoutExtension($name))})
+    if($entry.Count -ne 1){throw 'Generated duplicate not found in Recycle Bin'}
+    # Restore only this uniquely named fixture; never empty or alter other bin entries.
+    $entry[0].InvokeVerb('undelete')
+    $timer=[Diagnostics.Stopwatch]::StartNew()
+    while(-not (Test-Path $copy) -and $timer.Elapsed.TotalSeconds -lt 5){Start-Sleep -Milliseconds 100}
+    if(-not (Test-Path $copy)){throw 'Fixture restore did not finish'}
+    if([IO.File]::ReadAllText($copy) -ne [IO.File]::ReadAllText($original)){throw 'Restored bytes differ'}
+    if((Get-Content -LiteralPath $copy -Stream TestNotes -Raw) -ne (Get-Content -LiteralPath $original -Stream TestNotes -Raw)){throw 'Restored alternate stream differs'}
+} finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) }
+''')
+        self.assertEqual(rows[0]['Status'], 'Applied')
+        self.assertTrue(rows[0]['Verified'])
 
     def test_report_archive_exception_does_not_allow_report_queue(self):
         self.run_case(r'''
