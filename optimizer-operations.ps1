@@ -695,6 +695,32 @@ function Invoke-Operation {
     return 0
 }
 
+function Invoke-OperationWithProgress {
+    param([string]$Text, [string]$ScriptPath = $PSCommandPath)
+    $runspace = [runspacefactory]::CreateRunspace($Host)
+    $worker = [powershell]::Create()
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $runspace.ApartmentState = 'STA'
+        $runspace.Open()
+        $worker.Runspace = $runspace
+        [void]$worker.AddScript('. $args[0] -NoRun; Invoke-Operation $args[1]').AddArgument($ScriptPath).AddArgument($Text)
+        $pending = $worker.BeginInvoke()
+        $frame = 0
+        while (-not $pending.AsyncWaitHandle.WaitOne(250)) {
+            $dots = '.' * (1 + ($frame++ % 3))
+            Write-Progress -Id 1 -Activity 'Working' -Status ("Please wait{0} {1}s elapsed" -f $dots,[int]$timer.Elapsed.TotalSeconds) -PercentComplete -1
+        }
+        $result = @($worker.EndInvoke($pending))
+        if ($result.Count -ne 1) { throw 'Operation did not return a single result code.' }
+        return [int]$result[0]
+    } finally {
+        Write-Progress -Id 1 -Activity 'Working' -Completed
+        $worker.Dispose()
+        $runspace.Dispose()
+    }
+}
+
 if ($NoRun) { return }
 try {
     if ($Mode -eq 'Initialize') {
@@ -708,7 +734,7 @@ try {
     if ($Mode -eq 'CheckUser') { Assert-UserContext; exit 0 }
     if ($Mode -eq 'StorageType') { Get-SystemStorageType; exit 0 }
     if ($Mode -eq 'Summary') { exit (Show-OperationSummary) }
-    exit (Invoke-Operation $env:OPTIMIZER_OPERATION)
+    exit (Invoke-OperationWithProgress $env:OPTIMIZER_OPERATION)
 } catch {
     Write-Error "Result handling failed: $_" -ErrorAction Continue
     exit 1

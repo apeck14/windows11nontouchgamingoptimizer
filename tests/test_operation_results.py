@@ -26,6 +26,35 @@ class OperationResults(unittest.TestCase):
             return rows, result.stdout
 
 
+    def test_activity_indicator_ticks_preserves_output_and_failure_code(self):
+        rows, output = self.run_case(r'''
+$fixture=Join-Path (Split-Path $env:OPTIMIZER_RESULTS) 'worker fixture.ps1'
+@'
+param([switch]$NoRun)
+function Invoke-Operation($Text) {
+    if ([Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') { throw 'Cleanup UI requires STA' }
+    Write-Host 'Visible operation message'
+    Start-Sleep -Milliseconds 850
+    return [int]$Text
+}
+'@ | Set-Content -LiteralPath $fixture
+$script:updates=@()
+function Write-Progress {param($Id,$Activity,$Status,$PercentComplete,[switch]$Completed)
+    $script:updates+=@{Status=$Status;Completed=[bool]$Completed}
+}
+if ((Invoke-OperationWithProgress '1' $fixture) -ne 1) {throw 'Failure code was lost'}
+$active=@($script:updates | Where-Object {-not $_.Completed})
+if($active.Count -lt 2 -or $active[0].Status -eq $active[1].Status){throw 'Indicator did not animate'}
+if(-not $script:updates[-1].Completed){throw 'Indicator not cleared'}
+'param([switch]$NoRun); function Invoke-Operation($Text) {throw "Worker failed"}' | Set-Content -LiteralPath $fixture
+$threw=$false
+try {$null=Invoke-OperationWithProgress '0' $fixture} catch {$threw=$true}
+if(-not $threw -or -not $script:updates[-1].Completed){throw 'Worker error was swallowed or indicator remained'}
+if ((Invoke-OperationWithProgress 'Unknown Test') -ne 1) {throw 'Default worker path lost failure code'}
+''')
+        self.assertIn('Visible operation message', output)
+        self.assertEqual([r['Status'] for r in rows], ['Failed'])
+
     def test_managed_cpu_detection_and_parking_preserves_driver_control(self):
         rows, _ = self.run_case(r'''
 $script:cpu=''
