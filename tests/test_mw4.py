@@ -98,15 +98,38 @@ ConfigCloudStorageEnabled@0;1;1 = true
 Unknown@1;2;3 = $(throw 'Never evaluated')
 '@
 $text=$text.Replace("`r`n","`n").Replace("`n","`r`n")
-$result=Convert-Mw4Config $text $true
-if($result.Changes.Count -ne 6 -or $result.Skipped -ne 1){throw ('Incorrect compatible changes: '+($result | ConvertTo-Json -Depth 5))}
+$result=Convert-Mw4Config $text
+if($result.Changes.Count -ne 5 -or $result.Skipped -ne 0){throw ('Incorrect compatible changes: '+($result | ConvertTo-Json -Depth 5))}
 if($result.Text -notmatch '  DxrMode:0.0 = "Off" // one of Off, On'){throw 'Lost syntax'}
-foreach($line in $text -split "`r`n" | Where-Object {$_ -match '^(Resolution|Texture|Renderer|Mouse|ConfigCloud|Unknown|ShadowQuality|NvidiaReflex@1)'}) {
+foreach($line in $text -split "`r`n" | Where-Object {$_ -match '^(Resolution|Texture|Renderer|Mouse|ConfigCloud|Unknown|ShadowQuality|NvidiaReflex)'}) {
     if(-not $result.Text.Contains($line)){throw "Modified protected line: $line"}
 }
-if((Convert-Mw4Config $result.Text $true).Text -cne $result.Text){throw 'Not idempotent'}
-if((Convert-Mw4Config $text $false).Text -notmatch 'NvidiaReflex@0;12;99 = Enabled //'){throw 'Changed NVIDIA preference on AMD'}
+if((Convert-Mw4Config $result.Text).Text -cne $result.Text){throw 'Not idempotent'}
 ''')
+
+    def test_nvidia_reflex_is_preserved_and_only_guidance_is_shown(self):
+        with_text = self.run_case(r'''
+function Get-CimInstance { [pscustomobject]@{PNPDeviceID='PCI\VEN_10DE'} }
+function Open-Mw4Driver { throw [NotSupportedException]::new('Fixture driver unavailable') }
+$text=@'
+NvidiaReflex@0;12;99 = Disabled // one of Disabled, Enabled, Enabled + boost
+NvidiaReflex@1;12;99 = Enabled // one of Disabled, Enabled, Enabled + boost
+NvidiaReflex:0.0 = "Enabled + boost" // one of [Disabled, Enabled, Enabled + boost]
+NvidiaReflex@2;12;99 = Future
+'@
+$path=Join-Path $root 's.1.0.cod26.txt'
+[IO.File]::WriteAllText($path,$text)
+$hash=Get-Mw4Hash ([IO.File]::ReadAllBytes($path))
+$script:guidance=0
+function Write-Host { param($Object,$ForegroundColor)
+    if($Object -like '*Reflex (in game): start with Enabled.*CPU-limited*'){$script:guidance++}
+}
+Invoke-Mw4Optimization
+if((Get-Mw4Hash ([IO.File]::ReadAllBytes($path))) -ne $hash){throw 'Reflex preference was changed'}
+if(Test-Path (Get-Mw4BackupRoot)){throw 'Created a backup for unchanged Reflex settings'}
+if($script:guidance -ne 1){throw 'Missing or repeated Reflex guidance'}
+''')
+        self.assertFalse(any(r['Status'] in ('Applied', 'Failed') for r in with_text))
 
     def test_warzone_paired_configs_disable_both_depth_of_field_formats_and_restore(self):
         rows = self.run_case(r'''
@@ -154,11 +177,11 @@ TextureFilter:0.0 = "TEXTURE_FILTER_ANISO16X"
 $path=Join-Path $root 'options.3.cod22.txt'
 [IO.File]::WriteAllText($path,$text)
 if(@(Get-Mw4Files).Count -ne 1){throw 'Older retail config was not discovered'}
-$converted=Convert-Mw4Config $text $true
-if($converted.Changes.Count -ne 4 -or $converted.Skipped -ne 1){throw 'Older compatible settings were skipped'}
-if($converted.Text -notmatch 'NvidiaReflex:0.0 = "Enabled \+ boost" // one of \['){throw 'Bracketed Reflex domain did not retain formatting'}
+$converted=Convert-Mw4Config $text
+if($converted.Changes.Count -ne 3 -or $converted.Skipped -ne 1){throw 'Older compatible settings were skipped'}
+if($converted.Text -notmatch 'NvidiaReflex:0.0 = "Enabled" // one of \['){throw 'Bracketed Reflex domain did not retain formatting'}
 Invoke-Mw4Optimization
-if([IO.File]::ReadAllText($path) -cne (Convert-Mw4Config $text $false).Text){throw 'Applied config differs from preset'}
+if([IO.File]::ReadAllText($path) -cne (Convert-Mw4Config $text).Text){throw 'Applied config differs from preset'}
 Restore-Mw4Optimization
 if([IO.File]::ReadAllText($path) -cne $text){throw 'Older config restore differs'}
 ''')
@@ -252,7 +275,7 @@ ShaderQuality@0;1;1 = Automatic // one of Automatic, Normal, Advanced
 GPUUploadHeaps@0;1;1 = 2 // 0 to 3
 SSRQuality@0;1;1 = High // one of Low, Medium, High
 '@
-$result=Convert-Mw4Config $text $true
+$result=Convert-Mw4Config $text
 if($result.Text -cne $text -or $result.Changes.Count -ne 0 -or $result.Skipped -ne 2){throw 'Raised quality or forced incompatible values'}
 ''')
 
@@ -288,15 +311,13 @@ AmdAntilag2@1;1;1 = true
 AmdAntilag2@2;1;1 = 2 // 0 to 3
 AmdAntilag2@3;1;1 = false // one of false, disabled
 '@
-$result=Convert-Mw4Config $text $false $true
+$result=Convert-Mw4Config $text -AmdAntiLag2 $true
 if($result.Changes.Count -ne 2 -or $result.Skipped -ne 2){throw 'Incorrect compatible changes'}
 $expected=$text -replace '(?m)(^AmdAntilag2@0;57752;20945 = )false','$1true' -replace '= "false"','= "true"'
 if($result.Text -cne $expected){throw 'Changed incompatible values or formatting'}
-if((Convert-Mw4Config $result.Text $false $true).Changes.Count){throw 'Not idempotent'}
-foreach($nvidia in @($false,$true)) {
-    if((Convert-Mw4Config $text $nvidia).Text -cne $text){throw 'Changed Anti-Lag 2 without eligible Radeon'}
-}
-if((Convert-Mw4Config 'Unrelated@0;1;1 = false' $false $true).Text -cne 'Unrelated@0;1;1 = false'){throw 'Added missing setting'}
+if((Convert-Mw4Config $result.Text -AmdAntiLag2 $true).Changes.Count){throw 'Not idempotent'}
+if((Convert-Mw4Config $text).Text -cne $text){throw 'Changed Anti-Lag 2 without eligible Radeon'}
+if((Convert-Mw4Config 'Unrelated@0;1;1 = false' -AmdAntiLag2 $true).Text -cne 'Unrelated@0;1;1 = false'){throw 'Added missing setting'}
 ''')
 
     def test_radeon_antilag2_file_apply_noop_and_restore_preserve_upload_heaps(self):

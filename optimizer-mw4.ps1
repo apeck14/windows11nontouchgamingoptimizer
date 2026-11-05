@@ -43,7 +43,7 @@ function Test-Mw4AntiLag2Support {
 }
 
 function Convert-Mw4Config {
-    param([string]$Text, [bool]$Nvidia, [bool]$AmdAntiLag2 = $false)
+    param([string]$Text, [bool]$AmdAntiLag2 = $false)
     # Values come from the game's descriptions/ranges. Keep lower existing quality levels.
     $rules = @{
         VSync=@('disabled'); CapFps=@('false')
@@ -57,7 +57,6 @@ function Convert-Mw4Config {
         AmbientLightingQuality=@('Low','Off'); ScreenSpaceShadowQuality=@('Low','Off')
         VolumetricQuality=@('QUALITY_MEDIUM','QUALITY_LOW'); Tessellation=@('1_Near','0_Off')
     }
-    if ($Nvidia) { $rules.NvidiaReflex=@('Enabled + boost') }
     if ($AmdAntiLag2) { $rules.AmdAntilag2=@('true') }
     $changes = [Collections.Generic.List[object]]::new()
     $counts = @{Found=0;Skipped=0}
@@ -180,6 +179,7 @@ function Invoke-Mw4Optimization {
     }
     $adapters = @(Get-CimInstance Win32_VideoController -ErrorAction Stop)
     $nvidia = [bool]@($adapters | Where-Object { $_.PNPDeviceID -match 'VEN_10DE' }).Count
+    if ($nvidia) { Write-Host '  Reflex (in game): start with Enabled. Try Enabled + Boost if CPU-limited; compare latency and FPS.' }
     $amdAntiLag2 = Test-Mw4AntiLag2Support $adapters
     $plans = @()
     foreach ($file in $files) {
@@ -191,7 +191,7 @@ function Invoke-Mw4Optimization {
             $bytes = [IO.File]::ReadAllBytes($file.FullName)
             $encoding = Get-Mw4Encoding $bytes
             $text = $encoding.Encoding.GetString($bytes,$encoding.Offset,$bytes.Length-$encoding.Offset)
-            $converted = Convert-Mw4Config $text $nvidia $amdAntiLag2
+            $converted = Convert-Mw4Config $text $amdAntiLag2
             if ($converted.Skipped) { Write-OperationResult Unsupported "MW4 config $($file.Name)" "$($converted.Skipped) settings had an incompatible value/range and were preserved." }
             if (-not $converted.Changes.Count) {
                 if ($converted.Compatible) {
